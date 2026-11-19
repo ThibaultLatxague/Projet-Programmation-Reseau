@@ -11,6 +11,7 @@
 
 void echo_client(int sockfd) {
 	char buff[MSG_LEN];
+	char* response;
 	int n;
 	while (1) {
 		// Cleaning memory
@@ -19,19 +20,34 @@ void echo_client(int sockfd) {
 		printf("Message: ");
 		n = 0;
 		while ((buff[n++] = getchar()) != '\n') {} // trailing '\n' will be sent
-		// Sending message (ECHO)
-		if (send(sockfd, buff, strlen(buff), 0) <= 0) {
+		response = handle_message(buff, sockfd);
+		printf("Received: %s", response);
+	}
+}
+
+char* handle_message(char* msg, int sockfd) {
+	// Here you can implement any message handling logic if needed
+	// For now, it just prints the message
+	// Sending message (ECHO)
+
+	if(strcmp(msg, "/quit\n") == 0) {
+		send(sockfd, msg, strlen(msg), 0); // Send du quit au serveur pour qu'il termine la connexion avec ce client
+		memset(msg, 0, MSG_LEN); // Clean de la mémoire côté client
+		close(sockfd); // Close du socket côté client
+		exit(EXIT_SUCCESS); // Fermeture de notre connexion
+	} else {
+		// Sinon cas classique
+		if (send(sockfd, msg, strlen(msg), 0) <= 0) {
 			break;
 		}
 		printf("Message sent!\n");
-		// Cleaning memory
-		memset(buff, 0, MSG_LEN);
-		// Receiving message
-		if (recv(sockfd, buff, MSG_LEN, 0) <= 0) {
+		memset(msg, 0, MSG_LEN);
+		if (recv(sockfd, msg, MSG_LEN, 0) <= 0) {
 			break;
 		}
-		printf("Received: %s", buff);
+		printf("Handling message: %s", msg);
 	}
+	return msg;
 }
 
 int handle_connect(char* srv_addr, char* srv_port) {
