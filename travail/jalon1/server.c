@@ -18,23 +18,38 @@ void echo_server(int sockfd) {
 		if (recv(sockfd, buff, MSG_LEN, 0) <= 0) {
 			break;
 		}
-		printf("Received: %s", buff);
-		// Sending message (ECHO)
-		if (send(sockfd, buff, strlen(buff), 0) <= 0) {
-			break;
-		}
-		printf("Message sent!\n");
+		handle_message(buff, sockfd);
 	}
 }
 
-int handle_bind() {
+char* handle_message(char* msg, int sockfd) {
+	// /!\ ATTENTION : modifier la fonction pour fermer le client qui le demande uniquement
+	// Sending message (ECHO)
+
+	if(strcmp(msg, "/quit\n") == 0) {
+		printf("Test: /quit received from client\n");
+		memset(msg, 0, MSG_LEN); // Clean de la mémoire côté client
+		close(sockfd); // Close du socket côté client
+		exit(EXIT_SUCCESS); // Fermeture de notre connexion
+	} else {
+		printf("Received: %s", msg);
+		// Sending message (ECHO)
+		if (send(sockfd, msg, strlen(msg), 0) <= 0) {
+			return NULL;
+		}
+		printf("Message sent!\n");
+	}
+	return msg;
+}
+
+int handle_bind(char* serv_port) {
 	struct addrinfo hints, *result, *rp;
 	int sfd;
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
-	if (getaddrinfo(NULL, SERV_PORT, &hints, &result) != 0) {
+	if (getaddrinfo(NULL, serv_port, &hints, &result) != 0) {
 		perror("getaddrinfo()");
 		exit(EXIT_FAILURE);
 	}
@@ -57,11 +72,20 @@ int handle_bind() {
 	return sfd;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+	// Mauvaise utilisation de la création du serveur
+	if(argc != 2) {
+		fprintf(stderr, "Usage: %s <server_port>\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
+
+	// Récupération du port serveur depuis les arguments
+	char* server_port = argv[1];
+
 	struct sockaddr cli;
 	int sfd, connfd;
 	socklen_t len;
-	sfd = handle_bind();
+	sfd = handle_bind(server_port);
 	if ((listen(sfd, SOMAXCONN)) != 0) {
 		perror("listen()\n");
 		exit(EXIT_FAILURE);
