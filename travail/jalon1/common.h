@@ -6,3 +6,15 @@ struct info{
     short s;
     long l;
 };
+
+// Affiche les erreurs
+int die(int ret_value, char *msg)
+{
+	if (ret_value < 0)
+	{
+		perror(msg);
+		exit(EXIT_FAILURE);
+	}
+
+	return 0;
+}
