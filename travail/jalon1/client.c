@@ -32,18 +32,19 @@ char* handle_message(char* msg, int sockfd) {
 
 	if(strcmp(msg, "/quit\n") == 0) {
 		send(sockfd, msg, strlen(msg), 0); // Send du quit au serveur pour qu'il termine la connexion avec ce client
+		printf("Test: /quit sent to server\n");
 		memset(msg, 0, MSG_LEN); // Clean de la mémoire côté client
 		close(sockfd); // Close du socket côté client
 		exit(EXIT_SUCCESS); // Fermeture de notre connexion
 	} else {
 		// Sinon cas classique
 		if (send(sockfd, msg, strlen(msg), 0) <= 0) {
-			break;
+			die(-1, "send() failed");
 		}
 		printf("Message sent!\n");
 		memset(msg, 0, MSG_LEN);
 		if (recv(sockfd, msg, MSG_LEN, 0) <= 0) {
-			break;
+			die(-1, "recv() failed");
 		}
 		printf("Handling message: %s", msg);
 	}
