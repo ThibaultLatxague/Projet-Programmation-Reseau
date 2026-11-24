@@ -29,6 +29,7 @@ struct client
 	struct sockaddr_storage addr;
 	socklen_t addr_len;
 	struct client *next;
+	char nickname[NICK_LEN];
 };
 
 struct client *clients = NULL;
