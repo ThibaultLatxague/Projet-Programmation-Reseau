@@ -136,9 +136,13 @@ int handle_message(int sockfd)
 
 	printf("Received: %s", msg_recieved.infos);
 
-	if(msg_recieved.type == ECHO_SEND) {
-		if (send_next_message_size(sockfd, size) < 0 || send_message(sockfd, &msg_recieved, size) < 0)
+	if(msg_recieved.type == (enum msg_type)ECHO_SEND) {
+		printf("Size: %d\n", size);
+		printf("Message to send: %d\n", msg_recieved.type);
+		if (send_next_message_size(sockfd, size) < 0 || send_message(sockfd, &msg_recieved, size) < 0){
+			printf("Error sending message to client on fd %d\n", sockfd);
 			return -1;
+		}
 		printf("Message sent!\n");
 	}
 	

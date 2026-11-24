@@ -1,16 +1,4 @@
-#include <arpa/inet.h>
-#include <errno.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#include "common.h"
-#include "msg_struct.h"
+#include "client.h"
 
 int handle_connect(char *srv_addr, char *srv_port)
 {
@@ -45,41 +33,43 @@ int handle_connect(char *srv_addr, char *srv_port)
 
 // Lit une ligne au clavier et l'envoie au serveur (taille puis chaîne).
 // Retourne -1 si le client doit s'arrêter (/quit ou stdin fermée).
-int handle_stdin(int sockfd)
+int handle_message(int sockfd)
 {
-	struct msg_struct msg;
+	struct message* msg = malloc(sizeof(struct message));
 	char* user_input = handle_stdin(sockfd);
 	enum msg_type type = handle_command(sockfd, user_input);
-	handle_struct(sockfd, &msg, type, user_input);
-	handle_send(sockfd, &msg);
+	printf("Handling command of type: %d\n", type);
+	handle_struct(sockfd, msg, type, user_input);
+	handle_send(sockfd, msg);
 	
 	free(user_input);
+	free(msg);
 	return 0;
 }
 
-void handle_send(int sockfd, struct msg_struct* msg){
+void handle_send(int sockfd, struct message* msg){
 	die(send_next_message_size(sockfd, sizeof(*msg)), "on sending msg size");
 	die(send_message(sockfd, msg, sizeof(*msg)), "on sending msg");
 }
 
-void handle_struct(int sockfd, struct msg_struct* msg, enum msg_type type, char* user_input){
+void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* user_input){
 	if(type == NICKNAME_LIST || type == BROADCAST_SEND){
 		msg->pld_len = 0;
-		msg->infos = "";
+		strcpy(msg->infos, "");
 	} else {
-		msg->pld_len = strlen(msg->pld);
-		msg->infos = user_input;
+		msg->pld_len = strlen(user_input);
+		strcpy(msg->infos, user_input);
 	}
 
-	msg->nick_sender = "TOTO";
+	strcpy(msg->nick_sender, "TOTO");
 	msg->type = type;
 }
 
 enum msg_type handle_command(int sockfd, char* buffer){
 	if (strcmp(buffer, "/quit\n") == 0) {
-		return msg_type[MULTICAST_QUIT];
+		return (enum msg_type)MULTICAST_QUIT;
 	}
-	return msg_type[ECHO_SEND];
+	return (enum msg_type)ECHO_SEND;
 }
 
 char* handle_stdin(int sockfd){
@@ -88,27 +78,33 @@ char* handle_stdin(int sockfd){
 	// Ici, Afficher le nom de l'utilisateur qui parle
 	// Ici, vérifier la taille du message < 128 octets
 	if (fgets(buff, MSG_LEN, stdin) == NULL)
-		return -1;
+		return NULL;
 
-	return buff;
+	return strdup(buff);
 }
 
 // Reçoit la réponse du serveur (taille puis chaîne).
 // Retourne -1 si le serveur s'est déconnecté.
 int handle_server(int sockfd)
 {
-	char buff[MSG_LEN];
 	int size = 0;
 
-	memset(buff, 0, MSG_LEN);
 	if (recv_next_message_size(sockfd, &size) < 0)
 		return -1;
-	if (size <= 0 || size >= MSG_LEN)
+
+	struct message msg_recieved;
+	// memset(&msg_recieved, 0, sizeof(struct message));
+
+	if (recv_message(sockfd, &msg_recieved, size) < 0)
 		return -1;
-	if (recv_message(sockfd, buff, size) < 0)
+
+	if (strcmp(msg_recieved.infos, "/quit\n") == 0)
+	{
+		printf("/quit received from client on fd %d\n", sockfd);
 		return -1;
-	printf("Received: %s", buff);
-	return 0;
+	}
+
+	printf("Received: %s", msg_recieved.infos);
 }
 
 // Index des fds surveillés par poll
@@ -152,7 +148,7 @@ int main(int argc, char *argv[])
 		// Saisie utilisateur
 		if (fds[IDX_STDIN].revents & (POLLIN | POLLHUP))
 		{
-			if (handle_stdin(sfd) < 0)
+			if (handle_message(sfd) < 0)
 				break;
 		}
 
