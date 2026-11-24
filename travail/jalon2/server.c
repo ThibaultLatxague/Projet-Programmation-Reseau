@@ -42,7 +42,7 @@ void add_client(int fd, struct sockaddr_storage *addr, socklen_t addr_len)
 	c->addr = *addr;
 	c->addr_len = addr_len;
 	c->next = clients;
-	c->nickname = "";
+	strcpy(c->nickname, "");
 	clients = c;
 }
 
@@ -127,18 +127,27 @@ void disconnect_client(struct pollfd *pfd)
 	pfd->revents = 0;
 }
 
-int handle_command(int sockfd, char *buff)
+int handle_command(int sockfd, struct message *msg)
 {
-	if (strncmp(buff, "/quit", 5) == 0 && (buff[5] == '\0' || buff[5] == ' '))
+	switch(msg->type)
 	{
-		printf("/quit received from client on fd %d\n", sockfd);
-		return -1;
+		case MULTICAST_QUIT:
+			printf("/quit received from client on fd %d\n", sockfd);
+			return -1;
+		case NICKNAME_LIST:
+			printf("/who received from client on fd %d\n", sockfd);
+			break;
+		case NICKNAME_INFOS:
+			printf("/whois received from client on fd %d\n", sockfd);
+			break;
+		case UNICAST_SEND:
+			printf("/msg received from client on fd %d\n", sockfd);
+			break;
+		default:
+			break;
 	}
-	else if (strncmp(buff, "/who", 3) == 0 && (buff[3] == '\0' || buff[3] == ' '))
-  {
-  }
 }
-		
+
 void change_nickname(int sockfd, char* nickname){
 	struct client *c = clients;
 	while (c != NULL)
@@ -167,7 +176,7 @@ int handle_message(int sockfd)
 	if (recv_message(sockfd, &msg_recieved, size) < 0)
 		return -1;
 
-	if (handle_command(sockfd, msg_recieved.infos) < 0)
+	if (handle_command(sockfd, &msg_recieved) < 0)
 		return -1;
 
 	printf("Received: %s\n", msg_recieved.infos);
