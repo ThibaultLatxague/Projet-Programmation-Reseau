@@ -1,6 +1,8 @@
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,73 +11,30 @@
 
 #include "common.h"
 
-void echo_client(int sockfd) {
-	char buff[MSG_LEN];
-	char* response;
-	int n;
-	while (1) {
-		// Cleaning memory
-		memset(buff, 0, MSG_LEN);
-		// Getting message from client
-		printf("Message: ");
-		n = 0;
-		while ((buff[n++] = getchar()) != '\n') {} // trailing '\n' will be sent
-		response = handle_message(buff, sockfd);
-		printf("Received: %s", response);
-	}
-}
-
-char* handle_message(char* msg, int sockfd) {
-	// Here you can implement any message handling logic if needed
-	// For now, it just prints the message
-	// Sending message (ECHO)
-
-	if(strcmp(msg, "/quit\n") == 0) {
-		send(sockfd, msg, strlen(msg), 0); // Send du quit au serveur pour qu'il termine la connexion avec ce client
-		printf("Test: /quit sent to server\n");
-		memset(msg, 0, MSG_LEN); // Clean de la mémoire côté client
-		close(sockfd); // Close du socket côté client
-		exit(EXIT_SUCCESS); // Fermeture de notre connexion
-	} else {
-		// Sinon cas classique
-		if (send(sockfd, msg, strlen(msg), 0) <= 0) {
-			die(-1, "send() failed");
-		}
-		printf("Message sent!\n");
-		memset(msg, 0, MSG_LEN);
-		if (recv(sockfd, msg, MSG_LEN, 0) <= 0) {
-			die(-1, "recv() failed");
-		}
-		printf("Handling message: %s", msg);
-	}
-	return msg;
-}
-
-int handle_connect(char* srv_addr, char* srv_port) {
+int handle_connect(char *srv_addr, char *srv_port)
+{
 	struct addrinfo hints, *result, *rp;
 	int sfd;
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
-
-	// Affichage des valeurs de connexion pour les tests et remplacement des #define par les arguments passés par la fonction
-	printf("Test: SERV_ADDR = %s\n", srv_addr);
-	printf("Test: SERV_PORT = %s\n", srv_port);
-	if (getaddrinfo(srv_addr, srv_port, &hints, &result) != 0) {
-		perror("getaddrinfo()");
-		exit(EXIT_FAILURE);
-	}
-	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket(rp->ai_family, rp->ai_socktype,rp->ai_protocol);
-		if (sfd == -1) {
+	int ret = getaddrinfo(srv_addr, srv_port, &hints, &result);
+	die(ret != 0 ? -1 : 0, "error on getaddrinfo()");
+	for (rp = result; rp != NULL; rp = rp->ai_next)
+	{
+		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+		if (sfd == -1)
+		{
 			continue;
 		}
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
+		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
+		{
 			break;
 		}
 		close(sfd);
 	}
-	if (rp == NULL) {
+	if (rp == NULL)
+	{
 		fprintf(stderr, "Could not connect\n");
 		exit(EXIT_FAILURE);
 	}
@@ -83,23 +42,98 @@ int handle_connect(char* srv_addr, char* srv_port) {
 	return sfd;
 }
 
-int main(int argc, char * argv[]) {
-	// Vérification du nombre d'arguments
-	// 3 arguments car nom du programme + addresse + port
-	if(argc != 3){
-		fprintf(stderr, "Usage: %s <server_address> <server_port>\n", argv[0]);
+// Lit une ligne au clavier et l'envoie au serveur (taille puis chaîne).
+// Retourne -1 si le client doit s'arrêter (/quit ou stdin fermée).
+int handle_stdin(int sockfd)
+{
+	char buff[MSG_LEN];
+	memset(buff, 0, MSG_LEN);
+	if (fgets(buff, MSG_LEN, stdin) == NULL)
+		return -1;
+
+	int size = strlen(buff);
+	die(send_next_message_size(sockfd, size), "on sending msg size");
+	die(send_message(sockfd, buff, size), "on sending msg");
+
+	if (strcmp(buff, "/quit\n") == 0)
+		return -1;
+	return 0;
+}
+
+// Reçoit la réponse du serveur (taille puis chaîne).
+// Retourne -1 si le serveur s'est déconnecté.
+int handle_server(int sockfd)
+{
+	char buff[MSG_LEN];
+	int size = 0;
+
+	memset(buff, 0, MSG_LEN);
+	if (recv_next_message_size(sockfd, &size) < 0)
+		return -1;
+	if (size <= 0 || size >= MSG_LEN)
+		return -1;
+	if (recv_message(sockfd, buff, size) < 0)
+		return -1;
+	printf("Received: %s", buff);
+	return 0;
+}
+
+// Index des fds surveillés par poll
+enum
+{
+	IDX_STDIN = 0,
+	IDX_SOCK,
+	NB_FDS
+};
+
+int main(int argc, char *argv[])
+{
+	// 3 arguments : nom du programme + adresse + port
+	if (argc != 3)
+	{
+		fprintf(stderr, "Usage: %s <server_name> <server_port>\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
 
-	// Récupération des arguments
-	char* server_addr = argv[1];
-	char* server_port = argv[2];
+	int sfd = handle_connect(argv[1], argv[2]);
 
-	int sfd;
-	// Passage des arguments au serveur pour établir la connexion avec DNS
-	sfd = handle_connect(server_addr, server_port);
-	echo_client(sfd);
+	// Poll sur stdin (saisie utilisateur) et sur la socket (réponses serveur)
+	struct pollfd fds[NB_FDS];
+	fds[IDX_STDIN].fd = STDIN_FILENO;
+	fds[IDX_STDIN].events = POLLIN;
+	fds[IDX_STDIN].revents = 0;
+	fds[IDX_SOCK].fd = sfd;
+	fds[IDX_SOCK].events = POLLIN;
+	fds[IDX_SOCK].revents = 0;
+
+	while (1)
+	{
+		int nready = poll(fds, NB_FDS, -1);
+		if (nready < 0)
+		{
+			if (errno == EINTR)
+				continue;
+			die(nready, "poll");
+		}
+
+		// Saisie utilisateur
+		if (fds[IDX_STDIN].revents & (POLLIN | POLLHUP))
+		{
+			if (handle_stdin(sfd) < 0)
+				break;
+		}
+
+		// Réponse du serveur
+		if (fds[IDX_SOCK].revents & (POLLIN | POLLHUP | POLLERR))
+		{
+			if (handle_server(sfd) < 0)
+			{
+				printf("server disconnected\n");
+				break;
+			}
+		}
+	}
+
 	close(sfd);
 	return EXIT_SUCCESS;
 }
-
