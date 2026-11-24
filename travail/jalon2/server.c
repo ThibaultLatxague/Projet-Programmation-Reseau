@@ -117,27 +117,31 @@ void disconnect_client(struct pollfd *pfd)
 // Retourne -1 si le client se déconnecte ou envoie /quit.
 int handle_message(int sockfd)
 {
-	char buff[MSG_LEN];
 	int size = 0;
 
-	memset(buff, 0, MSG_LEN);
 	if (recv_next_message_size(sockfd, &size) < 0)
 		return -1;
-	if (size <= 0 || size >= MSG_LEN)
-		return -1;
-	if (recv_message(sockfd, buff, size) < 0)
+
+	struct message msg_recieved;
+	// memset(&msg_recieved, 0, sizeof(struct message));
+
+	if (recv_message(sockfd, &msg_recieved, size) < 0)
 		return -1;
 
-	if (strcmp(buff, "/quit\n") == 0)
+	if (strcmp(msg_recieved.infos, "/quit\n") == 0)
 	{
 		printf("/quit received from client on fd %d\n", sockfd);
 		return -1;
 	}
 
-	printf("Received: %s", buff);
-	if (send_next_message_size(sockfd, size) < 0 || send_message(sockfd, buff, size) < 0)
-		return -1;
-	printf("Message sent!\n");
+	printf("Received: %s", msg_recieved.infos);
+
+	if(msg_recieved.type == ECHO_SEND) {
+		if (send_next_message_size(sockfd, size) < 0 || send_message(sockfd, &msg_recieved, size) < 0)
+			return -1;
+		printf("Message sent!\n");
+	}
+	
 	return 0;
 }
 

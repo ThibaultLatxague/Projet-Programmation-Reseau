@@ -63,7 +63,7 @@ void handle_send(int sockfd, struct msg_struct* msg){
 }
 
 void handle_struct(int sockfd, struct msg_struct* msg, enum msg_type type, char* user_input){
-	if(type == NICKNAME_LIST || type == ECHO_SEND || type == BROADCAST_SEND){
+	if(type == NICKNAME_LIST || type == BROADCAST_SEND){
 		msg->pld_len = 0;
 		msg->infos = "";
 	} else {
