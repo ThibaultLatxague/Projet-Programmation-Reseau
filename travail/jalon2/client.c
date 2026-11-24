@@ -47,18 +47,50 @@ int handle_connect(char *srv_addr, char *srv_port)
 // Retourne -1 si le client doit s'arrêter (/quit ou stdin fermée).
 int handle_stdin(int sockfd)
 {
+	struct msg_struct msg;
+	char* user_input = handle_stdin(sockfd);
+	enum msg_type type = handle_command(sockfd, user_input);
+	handle_struct(sockfd, &msg, type, user_input);
+	handle_send(sockfd, &msg);
+	
+	free(user_input);
+	return 0;
+}
+
+void handle_send(int sockfd, struct msg_struct* msg){
+	die(send_next_message_size(sockfd, sizeof(*msg)), "on sending msg size");
+	die(send_message(sockfd, msg, sizeof(*msg)), "on sending msg");
+}
+
+void handle_struct(int sockfd, struct msg_struct* msg, enum msg_type type, char* user_input){
+	if(type == NICKNAME_LIST || type == ECHO_SEND || type == BROADCAST_SEND){
+		msg->pld_len = 0;
+		msg->infos = "";
+	} else {
+		msg->pld_len = strlen(msg->pld);
+		msg->infos = user_input;
+	}
+
+	msg->nick_sender = "TOTO";
+	msg->type = type;
+}
+
+enum msg_type handle_command(int sockfd, char* buffer){
+	if (strcmp(buffer, "/quit\n") == 0) {
+		return msg_type[MULTICAST_QUIT];
+	}
+	return msg_type[ECHO_SEND];
+}
+
+char* handle_stdin(int sockfd){
 	char buff[MSG_LEN];
 	memset(buff, 0, MSG_LEN);
+	// Ici, Afficher le nom de l'utilisateur qui parle
+	// Ici, vérifier la taille du message < 128 octets
 	if (fgets(buff, MSG_LEN, stdin) == NULL)
 		return -1;
 
-	int size = strlen(buff);
-	die(send_next_message_size(sockfd, size), "on sending msg size");
-	die(send_message(sockfd, buff, size), "on sending msg");
-
-	if (strcmp(buff, "/quit\n") == 0)
-		return -1;
-	return 0;
+	return buff;
 }
 
 // Reçoit la réponse du serveur (taille puis chaîne).
