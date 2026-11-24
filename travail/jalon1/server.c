@@ -35,11 +35,7 @@ struct client *clients = NULL;
 void add_client(int fd, struct sockaddr_storage *addr, socklen_t addr_len)
 {
 	struct client *c = malloc(sizeof(struct client));
-	if (c == NULL)
-	{
-		perror("malloc()");
-		exit(EXIT_FAILURE);
-	}
+	die(c == NULL ? -1 : 0, "malloc()");
 	c->fd = fd;
 	c->addr = *addr;
 	c->addr_len = addr_len;
@@ -79,11 +75,8 @@ int handle_bind(char *serv_port)
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
-	if (getaddrinfo(NULL, serv_port, &hints, &result) != 0)
-	{
-		perror("getaddrinfo()");
-		exit(EXIT_FAILURE);
-	}
+	int gai_ret = getaddrinfo(NULL, serv_port, &hints, &result);
+	die(gai_ret != 0 ? -1 : 0, "getaddrinfo()");
 	for (rp = result; rp != NULL; rp = rp->ai_next)
 	{
 		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
@@ -156,11 +149,7 @@ int main(int argc, char *argv[])
 	}
 
 	int listen_fd = handle_bind(argv[1]);
-	if ((listen(listen_fd, BACKLOG)) != 0)
-	{
-		perror("listen()\n");
-		exit(EXIT_FAILURE);
-	}
+	die(listen(listen_fd, BACKLOG), "listen()");
 
 	// Poll sur la socket d'écoute (indice 0) et sur les sockets clientes
 	struct pollfd fds[MAX_CONN] = {0};
@@ -174,7 +163,7 @@ int main(int argc, char *argv[])
 	fds[0].events = POLLIN;
 	fds[0].revents = 0;
 
-	while (running)
+	while (1)
 	{
 		int nfds = poll(fds, MAX_CONN, -1);
 		if (nfds < 0)

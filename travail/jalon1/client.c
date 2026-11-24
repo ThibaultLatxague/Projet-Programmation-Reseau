@@ -18,11 +18,8 @@ int handle_connect(char *srv_addr, char *srv_port)
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
-	if (getaddrinfo(srv_addr, srv_port, &hints, &result) != 0)
-	{
-		perror("getaddrinfo()");
-		exit(EXIT_FAILURE);
-	}
+	int ret = getaddrinfo(srv_addr, srv_port, &hints, &result);
+	die(ret != 0 ? -1 : 0, "error on getaddrinfo()");
 	for (rp = result; rp != NULL; rp = rp->ai_next)
 	{
 		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
