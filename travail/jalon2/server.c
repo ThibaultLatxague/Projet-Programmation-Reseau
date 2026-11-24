@@ -17,12 +17,12 @@
 #define MAX_CONN 20
 
 /*
- * Le serveur doit conserver pour chaque client : 
+ * Le serveur doit conserver pour chaque client :
  * - le descripteur de socket
  * - l'adresse et le port du client
  * - la longueur de l'adresse (pour le port)
  * - un pointeur vers le client suivant dans la liste chaînée
-*/
+ */
 struct client
 {
 	int fd;
@@ -42,6 +42,7 @@ void add_client(int fd, struct sockaddr_storage *addr, socklen_t addr_len)
 	c->addr = *addr;
 	c->addr_len = addr_len;
 	c->next = clients;
+	c->nickname = "";
 	clients = c;
 }
 
@@ -126,6 +127,19 @@ void disconnect_client(struct pollfd *pfd)
 	pfd->revents = 0;
 }
 
+int handle_command(int sockfd, char *buff)
+{
+	if (strncmp(buff, "/quit", 5) == 0 && (buff[5] == '\0' || buff[5] == ' '))
+	{
+		printf("/quit received from client on fd %d\n", sockfd);
+		return -1;
+	}
+	else if (strncmp(buff, "/who", 3) == 0 && (buff[3] == '\0' || buff[3] == ' '))
+	{
+		
+	}
+}
+
 // Reçoit un message du client et le lui renvoie (ECHO).
 // Retourne -1 si le client se déconnecte ou envoie /quit.
 int handle_message(int sockfd)
@@ -141,31 +155,32 @@ int handle_message(int sockfd)
 	if (recv_message(sockfd, &msg_recieved, size) < 0)
 		return -1;
 
-	if (strcmp(msg_recieved.infos, "/quit\n") == 0)
-	{
-		printf("/quit received from client on fd %d\n", sockfd);
+	if (handle_command(sockfd, msg_recieved.infos) < 0)
 		return -1;
-	}
 
 	printf("Received: %s", msg_recieved.infos);
 
-	if(msg_recieved.type == (enum msg_type)ECHO_SEND) {
+	if (msg_recieved.type == (enum msg_type)ECHO_SEND)
+	{
 		printf("Size: %d\n", size);
 		printf("Message to send: %d\n", msg_recieved.type);
-		if (send_next_message_size(sockfd, size) < 0 || send_message(sockfd, &msg_recieved, size) < 0){
+		if (send_next_message_size(sockfd, size) < 0 || send_message(sockfd, &msg_recieved, size) < 0)
+		{
 			printf("Error sending message to client on fd %d\n", sockfd);
 			return -1;
 		}
 		printf("Message sent!\n");
-	} else if (msg_recieved.type == (enum msg_type)NICKNAME_NEW) {
-		if(is_nickname_available(msg_recieved.infos))
+	}
+	else if (msg_recieved.type == (enum msg_type)NICKNAME_NEW)
+	{
+		if (is_nickname_available(msg_recieved.infos))
 			// Ici, donner la confirmation au client que le nickname a été accepté
 			printf("New nickname request from client on fd %d: %s\n", sockfd, msg_recieved.infos);
 		else
 			// Ici, donner l'info au client que le nickname a été refusé
 			printf("Nickname %s is already taken for client on fd %d\n", msg_recieved.infos, sockfd);
 	}
-	
+
 	return 0;
 }
 
