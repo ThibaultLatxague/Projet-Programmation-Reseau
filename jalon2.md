@@ -59,14 +59,15 @@ Chaque échange suit l'ordre suivant :
 
 Pour ce jalon, utilisez `NICKNAME_NEW`, `NICKNAME_LIST`, `NICKNAME_INFOS`, `ECHO_SEND`, `UNICAST_SEND` et `BROADCAST_SEND`.
 
-| Type | Contenu de `infos` |
-| --- | --- |
-| `NICKNAME_NEW` | Nouveau pseudo. `nick_sender` est vide avant l'attribution d'un pseudo, sinon il contient le pseudo actuel. |
-| `NICKNAME_LIST` | Chaîne vide. |
-| `NICKNAME_INFOS` | Pseudo de l'utilisateur recherché. |
-| `ECHO_SEND` | Chaîne vide. |
-| `UNICAST_SEND` | Pseudo du destinataire. |
-| `BROADCAST_SEND` | Chaîne vide. |
+
+| Type             | Contenu de `infos`                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `NICKNAME_NEW`   | Nouveau pseudo. `nick_sender` est vide avant l'attribution d'un pseudo, sinon il contient le pseudo actuel. |
+| `NICKNAME_LIST`  | Chaîne vide.                                                                                               |
+| `NICKNAME_INFOS` | Pseudo de l'utilisateur recherché.                                                                         |
+| `ECHO_SEND`      | Chaîne vide.                                                                                               |
+| `UNICAST_SEND`   | Pseudo du destinataire.                                                                                     |
+| `BROADCAST_SEND` | Chaîne vide.                                                                                               |
 
 ## Exigences
 
