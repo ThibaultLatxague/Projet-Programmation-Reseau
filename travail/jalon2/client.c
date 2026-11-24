@@ -1,5 +1,7 @@
 #include "client.h"
 
+static int parse_nickname(const char* buffer, char* nick);
+
 int handle_connect(char *srv_addr, char *srv_port)
 {
 	struct addrinfo hints, *result, *rp;
@@ -38,6 +40,11 @@ int handle_message(int sockfd)
 	struct message* msg = malloc(sizeof(struct message));
 	char* user_input = handle_stdin(sockfd);
 	enum msg_type type = handle_command(sockfd, user_input);
+	if ((int)type < 0) {
+		free(user_input);
+		free(msg);
+		return 0;
+	}
 	printf("Handling command of type: %d\n", type);
 	handle_struct(sockfd, msg, type, user_input);
 	handle_send(sockfd, msg);
@@ -56,6 +63,10 @@ void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* us
 	if(type == NICKNAME_LIST || type == BROADCAST_SEND){
 		msg->pld_len = 0;
 		strcpy(msg->infos, "");
+	} else if (type == NICKNAME_NEW) {
+		// Le serveur reçoit uniquement le pseudo (déjà validé par handle_command)
+		parse_nickname(user_input, msg->infos);
+		msg->pld_len = strlen(msg->infos);
 	} else {
 		msg->pld_len = strlen(user_input);
 		strcpy(msg->infos, user_input);
@@ -65,10 +76,43 @@ void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* us
 	msg->type = type;
 }
 
+// Extrait le pseudo d'une commande "/nick <pseudo>\n" dans nick (taille NICK_LEN).
+// Retourne 0 si le pseudo est valide (lettres/chiffres uniquement, 1 à NICK_LEN-1
+// caractères, la place restante étant réservée au '\0'), -1 sinon (message d'erreur affiché).
+static int parse_nickname(const char* buffer, char* nick){
+	const char* start = buffer + strlen("/nick");
+	if (*start == ' ')
+		start++;
+	size_t len = strcspn(start, "\n");
+
+	if (len == 0) {
+		fprintf(stderr, "Nickname empty. Usage: /nick <nickname>\n");
+		return -1;
+	}
+	if (len >= NICK_LEN) {
+		fprintf(stderr, "Nickname too long (max %d characters)\n", NICK_LEN - 1);
+		return -1;
+	}
+	for (size_t i = 0; i < len; i++) {
+		char c = start[i];
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
+			fprintf(stderr, "Nickname invalid: only letters and digits are allowed\n");
+			return -1;
+		}
+	}
+	memcpy(nick, start, len);
+	nick[len] = '\0';
+	return 0;
+}
+
+// Retourne (enum msg_type)-1 si la commande est invalide (rien ne doit être envoyé).
 enum msg_type handle_command(int sockfd, char* buffer){
 	if (strcmp(buffer, "/quit\n") == 0) {
 		return (enum msg_type)MULTICAST_QUIT;
-	} else if (strstr(buffer, "/nick") == buffer) {
+	} else if (strncmp(buffer, "/nick", 5) == 0 && (buffer[5] == ' ' || buffer[5] == '\n' || buffer[5] == '\0')) {
+		char nick[NICK_LEN];
+		if (parse_nickname(buffer, nick) < 0)
+			return (enum msg_type)-1;
 		return (enum msg_type)NICKNAME_NEW;
 	}
 	return (enum msg_type)ECHO_SEND;
@@ -104,6 +148,14 @@ int handle_server(int sockfd)
 	{
 		printf("/quit received from client on fd %d\n", sockfd);
 		return -1;
+	}
+
+	if(msg_recieved.type == NICKNAME_NEW) {
+		if(msg_recieved.pld_len == 0 && strcmp(msg_recieved.infos, "Nickname already taken") == 0) {
+			printf("Nickname rejected by server: %s\n", msg_recieved.infos);
+		} else {
+			printf("Nickname accepted by server: %s\n", msg_recieved.infos);
+		}
 	}
 
 	printf("Received: %s", msg_recieved.infos);

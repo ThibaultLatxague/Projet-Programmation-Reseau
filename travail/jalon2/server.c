@@ -135,8 +135,20 @@ int handle_command(int sockfd, char *buff)
 		return -1;
 	}
 	else if (strncmp(buff, "/who", 3) == 0 && (buff[3] == '\0' || buff[3] == ' '))
-	{
+  {
+  }
+}
 		
+void change_nickname(int sockfd, char* nickname){
+	struct client *c = clients;
+	while (c != NULL)
+	{
+		if (c->fd == sockfd)
+		{
+			strcpy(c->nickname, nickname);
+			return;
+		}
+		c = c->next;
 	}
 }
 
@@ -158,7 +170,7 @@ int handle_message(int sockfd)
 	if (handle_command(sockfd, msg_recieved.infos) < 0)
 		return -1;
 
-	printf("Received: %s", msg_recieved.infos);
+	printf("Received: %s\n", msg_recieved.infos);
 
 	if (msg_recieved.type == (enum msg_type)ECHO_SEND)
 	{
@@ -170,15 +182,31 @@ int handle_message(int sockfd)
 			return -1;
 		}
 		printf("Message sent!\n");
-	}
-	else if (msg_recieved.type == (enum msg_type)NICKNAME_NEW)
-	{
-		if (is_nickname_available(msg_recieved.infos))
+	} else if (msg_recieved.type == (enum msg_type)NICKNAME_NEW) {
+		if(is_nickname_available(msg_recieved.infos)) {
 			// Ici, donner la confirmation au client que le nickname a été accepté
+			change_nickname(sockfd, msg_recieved.infos);
+			struct message msg;
+			msg.type = (enum msg_type)NICKNAME_NEW;
+			msg.pld_len = 0;
+			strcpy(msg.infos, msg_recieved.infos); // On renvoie le nickname pour informer le client que nickname enregistré
+			if (send_next_message_size(sockfd, sizeof(msg)) < 0 || send_message(sockfd, &msg, sizeof(msg)) < 0) {
+				printf("Error sending nickname acceptance to client on fd %d\n", sockfd);
+				return -1;
+			}
 			printf("New nickname request from client on fd %d: %s\n", sockfd, msg_recieved.infos);
-		else
+		} else {
 			// Ici, donner l'info au client que le nickname a été refusé
+			struct message msg;
+			msg.type = (enum msg_type)NICKNAME_NEW;
+			msg.pld_len = 0;
+			strcpy(msg.infos, "Nickname already taken");
+			if (send_next_message_size(sockfd, sizeof(msg)) < 0 || send_message(sockfd, &msg, sizeof(msg)) < 0) {
+				printf("Error sending nickname rejection to client on fd %d\n", sockfd);
+				return -1;
+			}
 			printf("Nickname %s is already taken for client on fd %d\n", msg_recieved.infos, sockfd);
+		}
 	}
 
 	return 0;
