@@ -68,6 +68,8 @@ void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* us
 enum msg_type handle_command(int sockfd, char* buffer){
 	if (strcmp(buffer, "/quit\n") == 0) {
 		return (enum msg_type)MULTICAST_QUIT;
+	} else if (strstr(buffer, "/nick") == buffer) {
+		return (enum msg_type)NICKNAME_NEW;
 	}
 	return (enum msg_type)ECHO_SEND;
 }

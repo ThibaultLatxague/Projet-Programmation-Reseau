@@ -69,6 +69,18 @@ void free_clients()
 		remove_client(clients->fd);
 }
 
+int is_nickname_available(const char *nickname)
+{
+	struct client *c = clients;
+	while (c != NULL)
+	{
+		if (strcmp(c->nickname, nickname) == 0)
+			return 0;
+		c = c->next;
+	}
+	return 1;
+}
+
 int handle_bind(char *serv_port)
 {
 	struct addrinfo hints, *result, *rp;
@@ -145,6 +157,13 @@ int handle_message(int sockfd)
 			return -1;
 		}
 		printf("Message sent!\n");
+	} else if (msg_recieved.type == (enum msg_type)NICKNAME_NEW) {
+		if(is_nickname_available(msg_recieved.infos))
+			// Ici, donner la confirmation au client que le nickname a été accepté
+			printf("New nickname request from client on fd %d: %s\n", sockfd, msg_recieved.infos);
+		else
+			// Ici, donner l'info au client que le nickname a été refusé
+			printf("Nickname %s is already taken for client on fd %d\n", msg_recieved.infos, sockfd);
 	}
 	
 	return 0;
