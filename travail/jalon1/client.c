@@ -1,57 +1,24 @@
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <poll.h>
 
 #include "common.h"
 
-#pragma region Fonction send
-
-int send_next_message_size(int sockfd, int size)
-{
-    int bytes_sent = 0;
-    int ret = 0;
-
-    while (bytes_sent != sizeof(int))
-    {
-        ret = write(sockfd, (char *)&size + bytes_sent, sizeof(size) - bytes_sent);
-        die(ret, "on writing msg size");
-        bytes_sent += ret;
-    }
-    
-    return bytes_sent;
-}
-
-int send_message(int sockfd, void *buf, int size)
-{
-    int bytes_sent = 0;
-    int ret = 0;
-
-    while (bytes_sent != size)
-    {
-        ret = write(sockfd, buf + bytes_sent, size - bytes_sent);
-        die(ret, "on writing");
-        bytes_sent += ret;
-    }
-
-    return bytes_sent;
-}
-
-#pragma endregion Fonction send
-
-int handle_connect()
+int handle_connect(char *srv_addr, char *srv_port)
 {
 	struct addrinfo hints, *result, *rp;
 	int sfd;
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
-	if (getaddrinfo(SERV_ADDR, SERV_PORT, &hints, &result) != 0)
+	if (getaddrinfo(srv_addr, srv_port, &hints, &result) != 0)
 	{
 		perror("getaddrinfo()");
 		exit(EXIT_FAILURE);
@@ -78,35 +45,40 @@ int handle_connect()
 	return sfd;
 }
 
-void handle_stdin(int sockfd)
+// Lit une ligne au clavier et l'envoie au serveur (taille puis chaîne).
+// Retourne -1 si le client doit s'arrêter (/quit ou stdin fermée).
+int handle_stdin(int sockfd)
 {
 	char buff[MSG_LEN];
-	int n;
-	// Cleaning memory
 	memset(buff, 0, MSG_LEN);
-	// Getting message from client
-	printf("Message: ");
-	n = 0;
-	while ((buff[n++] = getchar()) != '\n')
-	{
-	} // trailing '\n' will be sent
-	// Sending message (ECHO)
-	int ret = send(sockfd, buff, strlen(buff), 0);
-	die(ret, "on sending msg");
-	printf("Message sent!\n");
+	if (fgets(buff, MSG_LEN, stdin) == NULL)
+		return -1;
+
+	int size = strlen(buff);
+	die(send_next_message_size(sockfd, size), "on sending msg size");
+	die(send_message(sockfd, buff, size), "on sending msg");
+
+	if (strcmp(buff, "/quit\n") == 0)
+		return -1;
+	return 0;
 }
 
+// Reçoit la réponse du serveur (taille puis chaîne).
+// Retourne -1 si le serveur s'est déconnecté.
 int handle_server(int sockfd)
 {
 	char buff[MSG_LEN];
-	// Cleaning memory
+	int size = 0;
+
 	memset(buff, 0, MSG_LEN);
-	// Receiving message
-	int ret = recv(sockfd, buff, MSG_LEN, 0);
-	if (ret == 0 || ret < 0)
-		return ret;
+	if (recv_next_message_size(sockfd, &size) < 0)
+		return -1;
+	if (size <= 0 || size >= MSG_LEN)
+		return -1;
+	if (recv_message(sockfd, buff, size) < 0)
+		return -1;
 	printf("Received: %s", buff);
-	return ret;
+	return 0;
 }
 
 // Index des fds surveillés par poll
@@ -117,11 +89,18 @@ enum
 	NB_FDS
 };
 
-int main()
+int main(int argc, char *argv[])
 {
-	int sfd = handle_connect();
+	// 3 arguments : nom du programme + adresse + port
+	if (argc != 3)
+	{
+		fprintf(stderr, "Usage: %s <server_name> <server_port>\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
 
-	// Poll sur stdin (saisie utilisateur) et sur la socket (notifications serveur)
+	int sfd = handle_connect(argv[1], argv[2]);
+
+	// Poll sur stdin (saisie utilisateur) et sur la socket (réponses serveur)
 	struct pollfd fds[NB_FDS];
 	fds[IDX_STDIN].fd = STDIN_FILENO;
 	fds[IDX_STDIN].events = POLLIN;
@@ -133,25 +112,28 @@ int main()
 	while (1)
 	{
 		int nready = poll(fds, NB_FDS, -1);
-		die(nready, "poll");
+		if (nready < 0)
+		{
+			if (errno == EINTR)
+				continue;
+			die(nready, "poll");
+		}
 
 		// Saisie utilisateur
 		if (fds[IDX_STDIN].revents & (POLLIN | POLLHUP))
 		{
-			handle_stdin(sfd);
+			if (handle_stdin(sfd) < 0)
+				break;
 		}
 
-		// Notification du serveur
+		// Réponse du serveur
 		if (fds[IDX_SOCK].revents & (POLLIN | POLLHUP | POLLERR))
 		{
-			int ret = handle_server(sfd);
-			if (ret == 0)
+			if (handle_server(sfd) < 0)
 			{
 				printf("server disconnected\n");
 				break;
 			}
-			die(ret, "on receiving response");
-			fds[IDX_SOCK].revents = 0;
 		}
 	}
 
