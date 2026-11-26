@@ -1,3 +1,5 @@
+#pragma once
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -11,6 +13,7 @@
 
 #include "common.h"
 #include "msg_struct.h"
+#include "../include/protocol.h"
 
 void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* user_input);
 

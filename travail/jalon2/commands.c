@@ -11,34 +11,37 @@
 #include <unistd.h>
 
 #include "common.h"
-// #include "msg_struct.h"
+#include "msg_struct.h"
 #include "commands.h"
+#include "../include/protocol.h"
+
+static int send_response(int sockfd, enum msg_type type, const char *infos, const char *payload)
+{
+	struct message response = {0};
+	response.type = type;
+	if (infos != NULL)
+		snprintf(response.infos, sizeof(response.infos), "%s", infos);
+	response.pld_len = payload != NULL ? (int)strlen(payload) : 0;
+	return protocol_send_message(sockfd, &response, payload);
+}
 
 void handle_nickname_new(int sockfd, struct message *msg)
 {
     if(is_nickname_available(msg->infos)) {
         // Ici, donner la confirmation au client que le nickname a été accepté
         change_nickname(sockfd, msg->infos);
-        struct message response;
-        response.type = (enum msg_type)NICKNAME_NEW;
-        response.pld_len = 0;
-        strcpy(response.infos, msg->infos); // On renvoie le nickname pour informer le client que nickname enregistré
-        if (send_next_message_size(sockfd, sizeof(response)) < 0 || send_message(sockfd, &response, sizeof(response)) < 0) {
+        if (send_response(sockfd, NICKNAME_NEW, msg->infos, msg->infos) < 0) {
             printf("Error sending nickname acceptance to client on fd %d\n", sockfd);
             return;
         }
-        printf("New nickname request from client on fd %d: %s\n", sockfd, response.infos);
+        printf("New nickname request from client on fd %d: %s\n", sockfd, msg->infos);
     } else {
         // Ici, donner l'info au client que le nickname a été refusé
-        struct message response;
-        response.type = (enum msg_type)NICKNAME_NEW;
-        response.pld_len = 0;
-        strcpy(response.infos, "Nickname already taken");
-        if (send_next_message_size(sockfd, sizeof(response)) < 0 || send_message(sockfd, &response, sizeof(response)) < 0) {
+        if (send_response(sockfd, NICKNAME_NEW, "Nickname already taken", "Nickname already taken") < 0) {
             printf("Error sending nickname rejection to client on fd %d\n", sockfd);
             return;
         }
-        printf("Nickname %s is already taken for client on fd %d\n", response.infos, sockfd);
+        printf("Nickname %s is already taken for client on fd %d\n", msg->infos, sockfd);
     }
     printf("End of NICKNAME_NEW handling for client on fd %d\n", sockfd);
     return;
@@ -47,17 +50,8 @@ void handle_nickname_new(int sockfd, struct message *msg)
 void handle_nickname_list(int sockfd)
 {
     char* nicknames = get_nicknames(sockfd);
-    struct message response;
-    response.type = (enum msg_type)NICKNAME_LIST;
-    response.pld_len = strlen(nicknames);
-
-    if(nicknames[0] == '\0') {
-        strcpy(response.infos, "<no nicknames available>");
-    } else {
-        strcpy(response.infos, nicknames);
-    }
-
-    if (send_next_message_size(sockfd, sizeof(response)) < 0 || send_message(sockfd, &response, sizeof(response)) < 0) {
+    const char *payload = nicknames[0] == '\0' ? "<no nicknames available>" : nicknames;
+    if (send_response(sockfd, NICKNAME_LIST, "", payload) < 0) {
         printf("Error sending nickname list to client on fd %d\n", sockfd);
     }
     printf("End of NICKNAME_LIST handling for client on fd %d\n", sockfd);
@@ -66,19 +60,8 @@ void handle_nickname_list(int sockfd)
 void handle_nickname_infos(int sockfd, struct message *msg)
 {
     char* client_info = get_client(sockfd, msg->infos);
-    struct message response;
-    response.type = (enum msg_type)NICKNAME_INFOS;
-    if (client_info != NULL)
-    {
-        response.pld_len = strlen(client_info);
-        strcpy(response.infos, client_info);
-    }
-    else
-    {
-        response.pld_len = 0;
-        strcpy(response.infos, "Client not found");
-    }
-    if (send_next_message_size(sockfd, sizeof(response)) < 0 || send_message(sockfd, &response, sizeof(response)) < 0)
+    const char *payload = client_info != NULL ? client_info : "Client not found";
+    if (send_response(sockfd, NICKNAME_INFOS, "", payload) < 0)
     {
         printf("Error sending client info to client on fd %d\n", sockfd);
         return;
@@ -86,22 +69,18 @@ void handle_nickname_infos(int sockfd, struct message *msg)
     printf("End of NICKNAME_INFOS handling for client on fd %d\n", sockfd);
 }
 
-void handle_unicast_send(int sockfd, struct message *msg)
+void handle_unicast_send(int sockfd, struct message *msg, const char *payload)
 {
     // Ici, faire attention
     // Il faut différencier dans le message le pseudo du destinataire et le contenu du message
     // Actuellement, on ne fait aucune différence
     struct client *c = clients;
     char* recipient_nickname = msg->infos;
-    struct message response;
     while (c != NULL)
     {
         if (strcmp(c->nickname, recipient_nickname) == 0)
         {
-            response.type = (enum msg_type)UNICAST_SEND;
-            response.pld_len = strlen(msg->infos);
-            strcpy(response.infos, msg->infos);
-            if (send_next_message_size(c->fd, sizeof(response)) < 0 || send_message(c->fd, &response, sizeof(response)) < 0)
+            if (send_response(c->fd, UNICAST_SEND, msg->nick_sender, payload) < 0)
             {
                 printf("Error sending unicast message to client on fd %d\n", c->fd);
             }
@@ -112,18 +91,14 @@ void handle_unicast_send(int sockfd, struct message *msg)
     printf("Recipient %s not found for client on fd %d\n", recipient_nickname, sockfd);
 }
 
-void handle_broadcast_send(int sockfd, struct message *msg)
+void handle_broadcast_send(int sockfd, struct message *msg, const char *payload)
 {
     struct client *c = clients;
     while (c != NULL)
     {
         if (c->fd != sockfd && c->nickname[0] != '\0')
         {
-            struct message response;
-            response.type = (enum msg_type)BROADCAST_SEND;
-            response.pld_len = strlen(msg->infos);
-            strcpy(response.infos, msg->infos);
-            if (send_next_message_size(c->fd, sizeof(response)) < 0 || send_message(c->fd, &response, sizeof(response)) < 0)
+            if (send_response(c->fd, BROADCAST_SEND, msg->nick_sender, payload) < 0)
             {
                 printf("Error sending broadcast message to client on fd %d\n", c->fd);
             }
@@ -133,9 +108,9 @@ void handle_broadcast_send(int sockfd, struct message *msg)
     printf("End of BROADCAST_SEND handling for client on fd %d\n", sockfd);
 }
 
-void handle_echo_send(int sockfd, struct message *msg)
+void handle_echo_send(int sockfd, struct message *msg, const char *payload)
 {
-    if (send_next_message_size(sockfd, sizeof(struct message)) < 0 || send_message(sockfd, msg, sizeof(struct message)) < 0)
+    if (protocol_send_message(sockfd, msg, payload) < 0)
     {
         printf("Error sending message to client on fd %d\n", sockfd);
         return;
