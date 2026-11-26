@@ -1,6 +1,39 @@
+#include <time.h>
+
 #include "client.h"
 
 static int parse_nickname(const char* buffer, char* nick);
+
+// Envoie au serveur, juste après la connexion, l'heure de connexion, l'adresse IP
+// et le port locaux du client sous la forme "heure|ip|port" (type CLIENT_HELLO).
+static void send_hello(int sfd)
+{
+	struct sockaddr_storage local;
+	socklen_t local_len = sizeof(local);
+	char ip[64] = "unknown";
+	char port[64] = "unknown";
+	char date[64];
+	char payload[MSG_LEN];
+
+	if (getsockname(sfd, (struct sockaddr *)&local, &local_len) == 0)
+	{
+		// Remplit local avec l'adresse et le port locaux choisis par l'OS
+		getnameinfo((struct sockaddr *)&local, local_len, ip, sizeof(ip), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
+	}
+
+	time_t now = time(NULL);
+	strftime(date, sizeof(date), "%Y/%m/%d@%H:%M:%S", localtime(&now));
+
+	snprintf(payload, sizeof(payload), "%s|%s|%s", date, ip, port);
+
+	struct message msg = {0};
+	msg.type = CLIENT_HELLO;
+	msg.pld_len = (int)strlen(payload);
+	if (protocol_send_message(sfd, &msg, payload) < 0)
+	{
+		fprintf(stderr, "Could not send connection infos to server\n");
+	}
+}
 
 int handle_connect(char *srv_addr, char *srv_port)
 {
@@ -20,6 +53,7 @@ int handle_connect(char *srv_addr, char *srv_port)
 		}
 		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
 		{
+			send_hello(sfd);
 			break;
 		}
 		close(sfd);
@@ -78,7 +112,7 @@ void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* pa
 		strcpy(msg->infos, "");
 	}
 
-	strcpy(msg->nick_sender, "TOTO");
+	strcpy(msg->nick_sender, "userx");
 	msg->type = type;
 	msg->pld_len = strlen(payload);
 }
@@ -179,10 +213,8 @@ int handle_server(int sockfd)
 		printf("/quit received from client on fd %d\n", sockfd);
 		free(payload);
 		return -1;
-	} else if (msg_recieved.type == ECHO_SEND){
-		printf("%s", payload_str);
 	} else {
-		printf("%s", payload_str);
+		printf("%s\n\n", payload_str);
 	}
 
 	free(payload);

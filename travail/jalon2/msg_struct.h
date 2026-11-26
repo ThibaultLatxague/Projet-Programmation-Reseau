@@ -19,7 +19,8 @@ enum msg_type {
 	FILE_ACCEPT,
 	FILE_REJECT,
 	FILE_SEND,
-	FILE_ACK
+	FILE_ACK,
+	CLIENT_HELLO
 };
 
 struct message {
@@ -45,6 +46,7 @@ static char* msg_type_str[] __attribute__((unused)) = {
 	"FILE_ACCEPT",
 	"FILE_REJECT",
 	"FILE_SEND",
-	"FILE_ACK"
+	"FILE_ACK",
+	"CLIENT_HELLO"
 };
 

@@ -16,6 +16,9 @@ struct client
 {
 	int fd;
 	struct sockaddr_storage addr;
+	char time_of_connexion[64];
+	char ip_address[64];
+	char port_number[64];
 	socklen_t addr_len;
 	struct client *next;
 	char nickname[NICK_LEN];
@@ -24,6 +27,7 @@ struct client
 // Liste chaînée des clients (définie dans server.c)
 extern struct client *clients;
 
+void handle_client_hello(int sockfd, const char *payload);
 void handle_nickname_new(int sockfd, struct message *msg);
 void handle_nickname_list(int sockfd);
 void handle_nickname_infos(int sockfd, struct message *msg);

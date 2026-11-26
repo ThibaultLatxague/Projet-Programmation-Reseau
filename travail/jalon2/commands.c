@@ -25,20 +25,54 @@ static int send_response(int sockfd, enum msg_type type, const char *infos, cons
 	return protocol_send_message(sockfd, &response, payload);
 }
 
+// Pseudo actuel du client associé à sockfd ("" s'il est introuvable)
+static const char *nickname_of(int sockfd)
+{
+    for (struct client *c = clients; c != NULL; c = c->next)
+        if (c->fd == sockfd)
+            return c->nickname;
+    return "";
+}
+
+// Premier message d'un client : payload "heure|ip|port"
+void handle_client_hello(int sockfd, const char *payload)
+{
+    struct client *c = clients;
+    while (c != NULL && c->fd != sockfd)
+        c = c->next;
+    if (c == NULL)
+        return;
+
+    char buf[MSG_LEN];
+    snprintf(buf, sizeof(buf), "%s", payload);
+    char *time_s = strtok(buf, "|");
+    char *ip_s = strtok(NULL, "|");
+    char *port_s = strtok(NULL, "|");
+    if (time_s) snprintf(c->time_of_connexion, sizeof(c->time_of_connexion), "%s", time_s);
+    if (ip_s)   snprintf(c->ip_address, sizeof(c->ip_address), "%s", ip_s);
+    if (port_s) snprintf(c->port_number, sizeof(c->port_number), "%s", port_s);
+
+    char message_to_send[1024];
+    snprintf(message_to_send, sizeof(message_to_send),
+             "[Server] : Welcome on the chat, your temporary nickname is %s", c->nickname);
+    if (send_response(sockfd, CLIENT_HELLO, "", message_to_send) < 0)
+        printf("Error sending welcome message to client on fd %d\n", sockfd);
+}
+
 void handle_nickname_new(int sockfd, struct message *msg)
 {
     if(is_nickname_available(msg->infos)) {
         // Ici, donner la confirmation au client que le nickname a été accepté
         change_nickname(sockfd, msg->infos);
         char message_to_send[1024];
-        snprintf(message_to_send, sizeof(message_to_send), "[Server] : Welcome on the chat %s\n\n", msg->infos);
+        snprintf(message_to_send, sizeof(message_to_send), "[Server] : Welcome on the chat %s", msg->infos);
         if (send_response(sockfd, NICKNAME_NEW, "", message_to_send) < 0) {
             printf("Error sending nickname acceptance to client on fd %d\n", sockfd);
             return;
         }
     } else {
         // Ici, donner l'info au client que le nickname a été refusé
-        if (send_response(sockfd, NICKNAME_NEW, "", "[Server] : /!\\ Error : Nickname already taken\n\n") < 0) {
+        if (send_response(sockfd, NICKNAME_NEW, "", "[Server] : /!\\ Error : Nickname already taken") < 0) {
             printf("Error sending nickname rejection to client on fd %d\n", sockfd);
             return;
         }
@@ -48,8 +82,19 @@ void handle_nickname_new(int sockfd, struct message *msg)
 
 void handle_nickname_list(int sockfd)
 {
-    char* nicknames = get_nicknames(sockfd);
-    const char *payload = nicknames[0] == '\0' ? "[Server] : /!\\ Error : no nicknames available\n\n" : nicknames;
+    char new_payload[1024];
+    snprintf(new_payload, sizeof(new_payload), "[Server] : Online users are");
+    int has_users = 0;
+    for (struct client *c = clients; c != NULL; c = c->next)
+    {
+        if (c->nickname[0] == '\0')
+            continue;
+        has_users = 1;
+        strncat(new_payload, "\n           - ", sizeof(new_payload) - strlen(new_payload) - 1);
+        strncat(new_payload, c->nickname, sizeof(new_payload) - strlen(new_payload) - 1);
+    }
+    const char *payload = has_users ? new_payload : "[Server] : /!\\ Error : no nicknames available";
+
     if (send_response(sockfd, NICKNAME_LIST, "", payload) < 0) {
         printf("Error sending nickname list to client on fd %d\n", sockfd);
     }
@@ -58,7 +103,7 @@ void handle_nickname_list(int sockfd)
 void handle_nickname_infos(int sockfd, struct message *msg)
 {
     char* client_info = get_client(sockfd, msg->infos);
-    const char *payload = client_info != NULL ? client_info : "[Server] : /!\\ Error : Client not found\n\n";
+    const char *payload = client_info != NULL ? client_info : "[Server] : /!\\ Error : Client not found";
     if (send_response(sockfd, NICKNAME_INFOS, "", payload) < 0)
     {
         printf("Error sending client info to client on fd %d\n", sockfd);
@@ -73,6 +118,8 @@ void handle_unicast_send(int sockfd, struct message *msg, const char *payload)
     // Actuellement, on ne fait aucune différence
     struct client *c = clients;
     char* recipient_nickname = msg->infos;
+    // Le pseudo de l'expéditeur est celui connu du serveur (pas celui envoyé par le client)
+    snprintf(msg->nick_sender, sizeof(msg->nick_sender), "%s", nickname_of(sockfd));
     char formatted_payload[1024];
     snprintf(formatted_payload, sizeof(formatted_payload), "[%s] : %s", msg->nick_sender, payload);
     payload = formatted_payload;
@@ -88,11 +135,13 @@ void handle_unicast_send(int sockfd, struct message *msg, const char *payload)
         }
         c = c->next;
     }
+    send_response(sockfd, UNICAST_SEND, msg->nick_sender, "[Server] : /!\\ Error : User not found");
 }
 
 void handle_broadcast_send(int sockfd, struct message *msg, const char *payload)
 {
     struct client *c = clients;
+    snprintf(msg->nick_sender, sizeof(msg->nick_sender), "%s", nickname_of(sockfd));
     char formatted_payload[1024];
     snprintf(formatted_payload, sizeof(formatted_payload), "[%s] : %s", msg->nick_sender, payload);
     payload = formatted_payload;
@@ -176,7 +225,7 @@ char* get_client(int sockfd, char* nickname){
     {
         if (strcmp(c->nickname, nickname) == 0)
         {
-            snprintf(client_info, sizeof(client_info), "[Server] : %s connected since now with IP address not available\n\n", c->nickname);
+            snprintf(client_info, sizeof(client_info), "[Server] : %s connected since %s with IP address %s and port number %s", c->nickname, c->time_of_connexion, c->ip_address, c->port_number);
             return client_info;
         }
         c = c->next;

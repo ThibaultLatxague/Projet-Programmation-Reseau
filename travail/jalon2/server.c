@@ -26,8 +26,18 @@ void add_client(int fd, struct sockaddr_storage *addr, socklen_t addr_len)
 	c->fd = fd;
 	c->addr = *addr;
 	c->addr_len = addr_len;
+	strcpy(c->time_of_connexion, "unknown");
+	strcpy(c->ip_address, "unknown");
+	strcpy(c->port_number, "unknown");
+
+	// Pseudo temporaire "user<N>" où N s'incrémente à chaque connexion
+	// (on saute les pseudos déjà pris, par exemple choisis avec /nick)
+	static int connection_count = 0;
+	do
+		snprintf(c->nickname, sizeof(c->nickname), "user%d", ++connection_count);
+	while (!is_nickname_available(c->nickname));
+
 	c->next = clients;
-	strcpy(c->nickname, "");
 	clients = c;
 }
 
@@ -107,6 +117,10 @@ int handle_command(int sockfd, struct message *msg, const char *payload)
 		case MULTICAST_QUIT:
 			printf("/quit received from client on fd %d\n", sockfd);
 			return -1;
+		case CLIENT_HELLO:
+			printf("Connection infos received from client on fd %d\n", sockfd);
+			handle_client_hello(sockfd, payload);
+			break;
 		case NICKNAME_NEW:
 			printf("/nick received from client on fd %d\n", sockfd);
 			handle_nickname_new(sockfd, msg);
@@ -139,7 +153,7 @@ int handle_command(int sockfd, struct message *msg, const char *payload)
 // Reçoit un message du client et le lui renvoie (ECHO).
 // Retourne -1 si le client se déconnecte ou envoie /quit.
 int handle_message(int sockfd)
-{
+{ 
 	struct message msg_received;
 	void *payload = NULL;
 	if (protocol_recv_message(sockfd, &msg_received, &payload) < 0)

@@ -40,7 +40,7 @@ int protocol_validate_message(const struct message *message)
            message->pld_len >= 0 &&
            message->pld_len <= MSG_LEN &&
            message->type >= NICKNAME_NEW &&
-           message->type <= FILE_ACK;
+           message->type <= CLIENT_HELLO;
 }
 
 int protocol_send_message(int socket_fd, const struct message *message, const void *payload)
