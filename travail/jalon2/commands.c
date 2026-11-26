@@ -30,9 +30,8 @@ void handle_nickname_new(int sockfd, struct message *msg)
     if(is_nickname_available(msg->infos)) {
         // Ici, donner la confirmation au client que le nickname a été accepté
         change_nickname(sockfd, msg->infos);
-        char* message_to_send = "[Server] : Welcome on the chat ";
-        strcat(message_to_send, msg->infos);
-        strcat(message_to_send, "\n\n");
+        char message_to_send[1024];
+        snprintf(message_to_send, sizeof(message_to_send), "[Server] : Welcome on the chat %s\n\n", msg->infos);
         if (send_response(sockfd, NICKNAME_NEW, "", message_to_send) < 0) {
             printf("Error sending nickname acceptance to client on fd %d\n", sockfd);
             return;
@@ -115,7 +114,8 @@ void handle_echo_send(int sockfd, struct message *msg, const char *payload)
 {
     char message_to_send[1024];
     snprintf(message_to_send, sizeof(message_to_send), "[Server] : %s", payload);
-    if (protocol_send_message(sockfd, msg, message_to_send) < 0)
+    // send_response recalcule pld_len : msg->pld_len est celui du message reçu (sans le préfixe)
+    if (send_response(sockfd, ECHO_SEND, "", message_to_send) < 0)
     {
         printf("Error sending message to client on fd %d\n", sockfd);
         return;

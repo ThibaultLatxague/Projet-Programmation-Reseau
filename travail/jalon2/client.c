@@ -45,7 +45,6 @@ int handle_message(int sockfd)
 		free(msg);
 		return 0;
 	}
-	printf("Handling command of type: %d\n", type);
 	handle_struct(sockfd, msg, type, payload);
 	protocol_send_message(sockfd, msg, payload);
 	
@@ -123,7 +122,6 @@ enum msg_type handle_command(int sockfd, char* buffer){
 			return (enum msg_type)-1;
 		return (enum msg_type)NICKNAME_NEW;
 	} else if (strcmp(buffer, "/who\n") == 0) {
-		printf("/who sent\n");
 		return (enum msg_type)NICKNAME_LIST;
 	} else if (strncmp(buffer, "/whois", 6) == 0 && (buffer[6] == '\0' || buffer[6] == ' ')) {
 		// Ne garder dans le buffer que l'argument (le pseudo) après "/whois "
@@ -132,7 +130,6 @@ enum msg_type handle_command(int sockfd, char* buffer){
 			arg++;
 		arg[strcspn(arg, "\n")] = '\0';
 		memmove(buffer, arg, strlen(arg) + 1);
-		printf("/whois sent, argument: %s\n", buffer);
 		return (enum msg_type)NICKNAME_INFOS;
 
 	} else if (strncmp(buffer, "/msgall", 7) == 0 && (buffer[7] == '\0' || buffer[7] == ' ')) {
@@ -141,7 +138,6 @@ enum msg_type handle_command(int sockfd, char* buffer){
 			arg++;
 		arg[strcspn(arg, "\n")] = '\0';
 		memmove(buffer, arg, strlen(arg) + 1);
-		printf("/msgall sent, argument: %s\n", buffer);
 		return (enum msg_type)BROADCAST_SEND;
 
 	} else if (strncmp(buffer, "/msg", 4) == 0 && (buffer[4] == '\0' || buffer[4] == ' ')) {
@@ -150,7 +146,6 @@ enum msg_type handle_command(int sockfd, char* buffer){
 			arg++;
 		arg[strcspn(arg, "\n")] = '\0';
 		memmove(buffer, arg, strlen(arg) + 1);
-		printf("/msg sent, argument: %s\n", buffer);
 		return (enum msg_type)UNICAST_SEND;
 	}
 
@@ -184,17 +179,12 @@ int handle_server(int sockfd)
 		printf("/quit received from client on fd %d\n", sockfd);
 		free(payload);
 		return -1;
+	} else if (msg_recieved.type == ECHO_SEND){
+		printf("%s", payload_str);
+	} else {
+		printf("%s", payload_str);
 	}
 
-	if(msg_recieved.type == NICKNAME_NEW) {
-		if(strcmp(payload_str, "Nickname already taken") == 0) {
-			printf("Nickname rejected by server: %s\n", payload_str);
-		} else {
-			printf("Nickname accepted by server: %s\n", payload_str);
-		}
-	}
-
-	printf("Received: %s\n", payload_str);
 	free(payload);
 	return 0;
 }
