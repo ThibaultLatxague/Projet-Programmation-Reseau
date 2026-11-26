@@ -30,43 +30,41 @@ void handle_nickname_new(int sockfd, struct message *msg)
     if(is_nickname_available(msg->infos)) {
         // Ici, donner la confirmation au client que le nickname a été accepté
         change_nickname(sockfd, msg->infos);
-        if (send_response(sockfd, NICKNAME_NEW, msg->infos, msg->infos) < 0) {
+        char* message_to_send = "[Server] : Welcome on the chat ";
+        strcat(message_to_send, msg->infos);
+        strcat(message_to_send, "\n\n");
+        if (send_response(sockfd, NICKNAME_NEW, "", message_to_send) < 0) {
             printf("Error sending nickname acceptance to client on fd %d\n", sockfd);
             return;
         }
-        printf("New nickname request from client on fd %d: %s\n", sockfd, msg->infos);
     } else {
         // Ici, donner l'info au client que le nickname a été refusé
-        if (send_response(sockfd, NICKNAME_NEW, "Nickname already taken", "Nickname already taken") < 0) {
+        if (send_response(sockfd, NICKNAME_NEW, "", "[Server] : /!\\ Error : Nickname already taken\n\n") < 0) {
             printf("Error sending nickname rejection to client on fd %d\n", sockfd);
             return;
         }
-        printf("Nickname %s is already taken for client on fd %d\n", msg->infos, sockfd);
     }
-    printf("End of NICKNAME_NEW handling for client on fd %d\n", sockfd);
     return;
 }
 
 void handle_nickname_list(int sockfd)
 {
     char* nicknames = get_nicknames(sockfd);
-    const char *payload = nicknames[0] == '\0' ? "<no nicknames available>" : nicknames;
+    const char *payload = nicknames[0] == '\0' ? "[Server] : /!\\ Error : no nicknames available\n\n" : nicknames;
     if (send_response(sockfd, NICKNAME_LIST, "", payload) < 0) {
         printf("Error sending nickname list to client on fd %d\n", sockfd);
     }
-    printf("End of NICKNAME_LIST handling for client on fd %d\n", sockfd);
 }
 
 void handle_nickname_infos(int sockfd, struct message *msg)
 {
     char* client_info = get_client(sockfd, msg->infos);
-    const char *payload = client_info != NULL ? client_info : "Client not found";
+    const char *payload = client_info != NULL ? client_info : "[Server] : /!\\ Error : Client not found\n\n";
     if (send_response(sockfd, NICKNAME_INFOS, "", payload) < 0)
     {
         printf("Error sending client info to client on fd %d\n", sockfd);
         return;
     }
-    printf("End of NICKNAME_INFOS handling for client on fd %d\n", sockfd);
 }
 
 void handle_unicast_send(int sockfd, struct message *msg, const char *payload)
@@ -76,6 +74,9 @@ void handle_unicast_send(int sockfd, struct message *msg, const char *payload)
     // Actuellement, on ne fait aucune différence
     struct client *c = clients;
     char* recipient_nickname = msg->infos;
+    char formatted_payload[1024];
+    snprintf(formatted_payload, sizeof(formatted_payload), "[%s] : %s", msg->nick_sender, payload);
+    payload = formatted_payload;
     while (c != NULL)
     {
         if (strcmp(c->nickname, recipient_nickname) == 0)
@@ -88,12 +89,14 @@ void handle_unicast_send(int sockfd, struct message *msg, const char *payload)
         }
         c = c->next;
     }
-    printf("Recipient %s not found for client on fd %d\n", recipient_nickname, sockfd);
 }
 
 void handle_broadcast_send(int sockfd, struct message *msg, const char *payload)
 {
     struct client *c = clients;
+    char formatted_payload[1024];
+    snprintf(formatted_payload, sizeof(formatted_payload), "[%s] : %s", msg->nick_sender, payload);
+    payload = formatted_payload;
     while (c != NULL)
     {
         if (c->fd != sockfd && c->nickname[0] != '\0')
@@ -110,7 +113,9 @@ void handle_broadcast_send(int sockfd, struct message *msg, const char *payload)
 
 void handle_echo_send(int sockfd, struct message *msg, const char *payload)
 {
-    if (protocol_send_message(sockfd, msg, payload) < 0)
+    char message_to_send[1024];
+    snprintf(message_to_send, sizeof(message_to_send), "[Server] : %s", payload);
+    if (protocol_send_message(sockfd, msg, message_to_send) < 0)
     {
         printf("Error sending message to client on fd %d\n", sockfd);
         return;
@@ -171,7 +176,7 @@ char* get_client(int sockfd, char* nickname){
     {
         if (strcmp(c->nickname, nickname) == 0)
         {
-            snprintf(client_info, sizeof(client_info), "Nickname: %s\nFD: %d\n", c->nickname, c->fd);
+            snprintf(client_info, sizeof(client_info), "[Server] : %s connected since now with IP address not available\n\n", c->nickname);
             return client_info;
         }
         c = c->next;
