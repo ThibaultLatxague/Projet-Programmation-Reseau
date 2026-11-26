@@ -38,42 +38,50 @@ int handle_connect(char *srv_addr, char *srv_port)
 int handle_message(int sockfd)
 {
 	struct message* msg = malloc(sizeof(struct message));
-	char* user_input = handle_stdin(sockfd);
-	enum msg_type type = handle_command(sockfd, user_input);
+	char* payload = handle_stdin(sockfd);
+	enum msg_type type = handle_command(sockfd, payload);
 	if ((int)type < 0) {
-		free(user_input);
+		free(payload);
 		free(msg);
 		return 0;
 	}
 	printf("Handling command of type: %d\n", type);
-	handle_struct(sockfd, msg, type, user_input);
-	handle_send(sockfd, msg);
+	handle_struct(sockfd, msg, type, payload);
+	protocol_send_message(sockfd, msg, payload);
 	
-	free(user_input);
+	free(payload);
 	free(msg);
 	return 0;
 }
 
-void handle_send(int sockfd, struct message* msg){
-	die(send_next_message_size(sockfd, sizeof(*msg)), "on sending msg size");
-	die(send_message(sockfd, msg, sizeof(*msg)), "on sending msg");
-}
-
-void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* user_input){
+void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* payload){
 	if(type == NICKNAME_LIST){
-		msg->pld_len = 0;
+		memset(payload,0,strlen(payload)); // a ajouter si le message est une commande qui ne nécessite pas de payload
 		strcpy(msg->infos, "");
 	} else if (type == NICKNAME_NEW) {
 		// Le serveur reçoit uniquement le pseudo (déjà validé par handle_command)
-		parse_nickname(user_input, msg->infos);
-		msg->pld_len = strlen(msg->infos);
-	} else {
-		msg->pld_len = strlen(user_input);
-		strcpy(msg->infos, user_input);
+		parse_nickname(payload, msg->infos);
+		memset(payload,0,strlen(payload));
+	} else if (type == NICKNAME_INFOS) {
+		strcpy(msg->infos, payload);
+		memset(payload,0,strlen(payload));
+	} else if (type == ECHO_SEND){
+		strcpy(msg->infos, "");
+	} else if (type == UNICAST_SEND) {
+		char* space = strchr(payload, ' ');
+		if (space != NULL) {
+			size_t nick_len = space - payload;
+			strncpy(msg->infos, payload, nick_len);
+			msg->infos[nick_len] = '\0';
+			memmove(payload, space + 1, strlen(space + 1) + 1); // décaler pour retirer le pseudo
+		}
+	} else if (type == BROADCAST_SEND) {
+		strcpy(msg->infos, "");
 	}
 
 	strcpy(msg->nick_sender, "TOTO");
 	msg->type = type;
+	msg->pld_len = strlen(payload);
 }
 
 // Extrait le pseudo d'une commande "/nick <pseudo>\n" dans nick (taille NICK_LEN).
@@ -164,32 +172,30 @@ char* handle_stdin(int sockfd){
 // Retourne -1 si le serveur s'est déconnecté.
 int handle_server(int sockfd)
 {
-	int size = 0;
-
-	if (recv_next_message_size(sockfd, &size) < 0)
-		return -1;
-
 	struct message msg_recieved;
-	// memset(&msg_recieved, 0, sizeof(struct message));
-
-	if (recv_message(sockfd, &msg_recieved, size) < 0)
+	void *payload = NULL;
+	if (protocol_recv_message(sockfd, &msg_recieved, &payload) < 0)
 		return -1;
+
+	const char* payload_str = payload ? (char *)payload : "";
 
 	if (strcmp(msg_recieved.infos, "/quit\n") == 0)
 	{
 		printf("/quit received from client on fd %d\n", sockfd);
+		free(payload);
 		return -1;
 	}
 
 	if(msg_recieved.type == NICKNAME_NEW) {
-		if(msg_recieved.pld_len == 0 && strcmp(msg_recieved.infos, "Nickname already taken") == 0) {
-			printf("Nickname rejected by server: %s\n", msg_recieved.infos);
+		if(strcmp(payload_str, "Nickname already taken") == 0) {
+			printf("Nickname rejected by server: %s\n", payload_str);
 		} else {
-			printf("Nickname accepted by server: %s\n", msg_recieved.infos);
+			printf("Nickname accepted by server: %s\n", payload_str);
 		}
 	}
 
-	printf("Received: %s\n", msg_recieved.infos);
+	printf("Received: %s\n", payload_str);
+	free(payload);
 	return 0;
 }
 

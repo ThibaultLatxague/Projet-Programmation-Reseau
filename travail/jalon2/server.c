@@ -11,8 +11,8 @@
 #include <unistd.h>
 
 #include "common.h"
-// #include "msg_struct.h"
 #include "commands.h"
+#include "../include/protocol.h"
 
 #define BACKLOG 10
 #define MAX_CONN 20
@@ -100,7 +100,7 @@ void disconnect_client(struct pollfd *pfd)
 	pfd->revents = 0;
 }
 
-int handle_command(int sockfd, struct message *msg)
+int handle_command(int sockfd, struct message *msg, const char *payload)
 {
 	switch(msg->type)
 	{
@@ -121,16 +121,16 @@ int handle_command(int sockfd, struct message *msg)
 			break;
 		case UNICAST_SEND:
 			printf("/msg received from client on fd %d\n", sockfd);
-			handle_unicast_send(sockfd, msg);
+			handle_unicast_send(sockfd, msg, payload);
 			break;
 		case BROADCAST_SEND:
 			printf("/broadcast received from client on fd %d\n", sockfd);
-			handle_broadcast_send(sockfd, msg);
+			handle_broadcast_send(sockfd, msg, payload);
 			break;
 		default:
 			// Case ECHO_SEND par défaut selon les consignes du jalon 2
 			printf("No commands (using echo) received from client on fd %d\n", sockfd);
-			handle_echo_send(sockfd, msg);
+			handle_echo_send(sockfd, msg, payload);
 			break;
 	}
 	return 0;
@@ -140,21 +140,20 @@ int handle_command(int sockfd, struct message *msg)
 // Retourne -1 si le client se déconnecte ou envoie /quit.
 int handle_message(int sockfd)
 {
-	int size = 0;
-
-	if (recv_next_message_size(sockfd, &size) < 0)
+	struct message msg_received;
+	void *payload = NULL;
+	if (protocol_recv_message(sockfd, &msg_received, &payload) < 0)
 		return -1;
 
-	struct message msg_recieved;
-	// memset(&msg_recieved, 0, sizeof(struct message));
-
-	if (recv_message(sockfd, &msg_recieved, size) < 0)
+	const char *payload_str = payload ? (const char *)payload : "";
+	if (handle_command(sockfd, &msg_received, payload_str) < 0)
+	{
+		free(payload);
 		return -1;
+	}
 
-	if (handle_command(sockfd, &msg_recieved) < 0)
-		return -1;
-
-	printf("Received: %s\n", msg_recieved.infos);
+	printf("Received: %s\n", payload_str);
+	free(payload);
 	return 0;
 }
 

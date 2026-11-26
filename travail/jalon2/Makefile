@@ -1,16 +1,34 @@
 CFLAGS=-Wall
+CFLAGS+=-I. -I../include
 #LDFLAGS=-lpthread
-all: client server
+BUILD_DIR=build
+CLIENT=$(BUILD_DIR)/client
+SERVER=$(BUILD_DIR)/server
+OBJECTS=$(BUILD_DIR)/client.o $(BUILD_DIR)/server.o $(BUILD_DIR)/commands.o $(BUILD_DIR)/protocol.o
 
-client: client.o
+all: $(CLIENT) $(SERVER)
+
+$(BUILD_DIR):
+	mkdir -p $@
+
+$(CLIENT): $(BUILD_DIR)/client.o $(BUILD_DIR)/protocol.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-server: server.o commands.o
+$(SERVER): $(BUILD_DIR)/server.o $(BUILD_DIR)/commands.o $(BUILD_DIR)/protocol.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-client.o: client.c client.h common.h msg_struct.h
-server.o: server.c common.h commands.h msg_struct.h
-commands.o: commands.c common.h commands.h msg_struct.h
+$(BUILD_DIR)/client.o: client.c client.h common.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/server.o: server.c common.h commands.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/commands.o: commands.c common.h commands.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/protocol.o: ../src/common/protocol.c ../include/protocol.h common.h msg_struct.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f client server *.o
+	rm -f $(CLIENT) $(SERVER) $(OBJECTS)
+	rmdir $(BUILD_DIR) 2>/dev/null || true

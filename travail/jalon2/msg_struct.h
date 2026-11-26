@@ -1,3 +1,5 @@
+#pragma once
+
 #define NICK_LEN 128
 #define INFOS_LEN 128
 
