@@ -150,6 +150,15 @@ int handle_command(int sockfd, struct message *msg, const char *payload)
 			printf("/broadcast received from client on fd %d\n", sockfd);
 			handle_broadcast_send(sockfd, msg, payload);
 			break;
+		case FILE_REQUEST:
+			printf("/send received from client on fd %d\n", sockfd);
+			handle_file_request(sockfd, msg, payload);
+			break;
+		case FILE_ACCEPT:
+		case FILE_REJECT:
+			printf("File answer received from client on fd %d\n", sockfd);
+			handle_file_answer(sockfd, msg);
+			break;
 		default:
 			// Case ECHO_SEND par défaut selon les consignes du jalon 2
 			printf("No commands (using echo) received from client on fd %d\n", sockfd);

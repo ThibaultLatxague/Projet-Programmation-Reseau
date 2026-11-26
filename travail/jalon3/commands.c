@@ -131,9 +131,6 @@ void handle_nickname_infos(int sockfd, struct message *msg)
 
 void handle_unicast_send(int sockfd, struct message *msg, const char *payload)
 {
-    // Ici, faire attention
-    // Il faut différencier dans le message le pseudo du destinataire et le contenu du message
-    // Actuellement, on ne fait aucune différence
     struct client *c = clients;
     char* recipient_nickname = msg->infos;
     // Le pseudo de l'expéditeur est celui connu du serveur (pas celui envoyé par le client)
@@ -189,6 +186,54 @@ void handle_echo_send(int sockfd, struct message *msg, const char *payload)
     }
     printf("End of ECHO_SEND\n");
     return;
+}
+
+void handle_file_request(int sockfd, struct message *msg, const char *payload){
+    struct client *c = clients;
+    char* recipient_nickname = msg->infos;
+
+    // Le pseudo de l'expéditeur est celui connu du serveur (pas celui envoyé par le client)
+    snprintf(msg->nick_sender, sizeof(msg->nick_sender), "%s", nickname_of(sockfd));
+    char formatted_payload[1024];
+    snprintf(formatted_payload, sizeof(formatted_payload), "[Server] : [%s] wants you to accept the transfer of the file named \"%s\". Do you accept? [Y/N]", msg->nick_sender, payload);
+    payload = formatted_payload;
+
+    // Le serveur ne fait que relayer : la réponse Y/N du destinataire reviendra
+    // plus tard sous forme d'un message FILE_ACCEPT / FILE_REJECT (cf. handle_file_answer).
+    while (c != NULL)
+    {
+        if (c->nickname[0] != '\0' && strcmp(c->nickname, recipient_nickname) == 0)
+        {
+            if (send_response(c->fd, FILE_REQUEST, msg->nick_sender, payload) < 0)
+                printf("Error sending file request to client on fd %d\n", c->fd);
+            return;
+        }
+        c = c->next;
+    }
+    send_response(sockfd, FILE_REQUEST, "", "[Server] : /!\\ Error : User not found");
+}
+
+// Réponse du destinataire (FILE_ACCEPT / FILE_REJECT) : msg->infos = pseudo de l'émetteur initial.
+// On la relaie à l'émetteur.
+void handle_file_answer(int sockfd, struct message *msg)
+{
+    char text[1024];
+    const char *answerer = nickname_of(sockfd);
+    if (msg->type == FILE_ACCEPT)
+        snprintf(text, sizeof(text), "[Server] : %s accepted the file transfer", answerer);
+    else
+        snprintf(text, sizeof(text), "[Server] : %s declined the file transfer", answerer);
+
+    for (struct client *c = clients; c != NULL; c = c->next)
+    {
+        if (c->nickname[0] != '\0' && strcmp(c->nickname, msg->infos) == 0)
+        {
+            if (send_response(c->fd, msg->type, answerer, text) < 0)
+                printf("Error sending file answer to client on fd %d\n", c->fd);
+            return;
+        }
+    }
+    send_response(sockfd, msg->type, "", "[Server] : /!\\ Error : User not found");
 }
 
 

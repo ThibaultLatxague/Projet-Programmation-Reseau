@@ -23,13 +23,14 @@ Le périmètre attendu est un environnement de TP où les clients sont directeme
 
 ## Utilisation du champ `infos`
 
-| Type | Contenu de `infos` et du payload |
-| --- | --- |
-| `FILE_REQUEST` | `infos` contient le pseudo du destinataire ; le payload contient le nom du fichier. |
-| `FILE_ACCEPT` | `infos` contient le pseudo de l'émetteur initial ; le payload contient l'adresse et le port d'écoute du récepteur, par exemple `127.0.0.1:8081`. |
-| `FILE_REJECT` | `infos` contient le pseudo de l'émetteur initial. |
-| `FILE_SEND` | `infos` contient le nom du fichier ; le payload contient les données binaires du fichier. |
-| `FILE_ACK` | `infos` contient le nom du fichier correctement reçu. |
+
+| Type           | Contenu de `infos` et du payload                                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FILE_REQUEST` | `infos` contient le pseudo du destinataire ; le payload contient le nom du fichier.                                                                 |
+| `FILE_ACCEPT`  | `infos` contient le pseudo de l'émetteur initial ; le payload contient l'adresse et le port d'écoute du récepteur, par exemple `127.0.0.1:8081`. |
+| `FILE_REJECT`  | `infos` contient le pseudo de l'émetteur initial.                                                                                                  |
+| `FILE_SEND`    | `infos` contient le nom du fichier ; le payload contient les données binaires du fichier.                                                          |
+| `FILE_ACK`     | `infos` contient le nom du fichier correctement reçu.                                                                                              |
 
 Le payload de `FILE_SEND` n'est pas nécessairement du texte. Il peut contenir des octets nuls. N'utilisez donc pas de fonctions propres aux chaînes de caractères, telles que `strlen()`, `strcpy()` ou `strcmp()`, pour traiter ce payload.
 

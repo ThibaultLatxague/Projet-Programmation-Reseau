@@ -4,6 +4,9 @@
 
 static int parse_nickname(const char* buffer, char* nick);
 
+// Pseudo de l'émetteur d'une demande de transfert en attente de notre réponse Y/N ("" si aucune)
+static char pending_sender[NICK_LEN] = "";
+
 // Prévient le serveur que la connexion est établie (type CLIENT_HELLO) pour qu'il
 // réponde par le message de bienvenue.
 // CORRECTION (whois côté serveur) : le client n'envoie plus sa date/IP/port. Le
@@ -62,6 +65,26 @@ int handle_message(int sockfd)
 	if (msg == NULL)
 		return -1;
 	char* payload = handle_stdin(sockfd);
+
+	// Une demande de transfert est en attente : la saisie Y/N est la réponse à envoyer
+	if (pending_sender[0] != '\0' && payload != NULL) {
+		char answer = payload[0];
+		if (answer == 'Y' || answer == 'y' || answer == 'N' || answer == 'n') {
+			msg->type = (answer == 'Y' || answer == 'y') ? FILE_ACCEPT : FILE_REJECT;
+			snprintf(msg->infos, sizeof(msg->infos), "%s", pending_sender);
+			msg->pld_len = 0;
+			protocol_send_message(sockfd, msg, NULL);
+			pending_sender[0] = '\0';
+			free(payload);
+			free(msg);
+			return 0;
+		}
+		printf("Please respond with 'Y' or 'N': \n\n");
+		free(payload);
+		free(msg);
+		return 0;
+	}
+
 	enum msg_type type = handle_command(sockfd, payload);
 	if ((int)type < 0) {
 		free(payload);
@@ -101,6 +124,17 @@ void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* pa
 		}
 	} else if (type == BROADCAST_SEND) {
 		strcpy(msg->infos, "");
+	} else if (type == FILE_REQUEST) {
+		// "<pseudo> <fichier>" : infos = pseudo du destinataire, payload = nom du fichier
+		char* space = strchr(payload, ' ');
+		if (space != NULL) {
+			size_t nick_len = space - payload;
+			if (nick_len >= INFOS_LEN)
+				nick_len = INFOS_LEN - 1;
+			strncpy(msg->infos, payload, nick_len);
+			msg->infos[nick_len] = '\0';
+			memmove(payload, space + 1, strlen(space + 1) + 1);
+		}
 	}
 
 	strcpy(msg->nick_sender, "userx");
@@ -192,9 +226,10 @@ enum msg_type handle_command(int sockfd, char* buffer){
 		if (*arg == ' ')
 			arg++;
 		arg[strcspn(arg, "\n")] = '\0';
-		// Message d'usage si aucun message n'est fourni
-		if (*arg == '\0') {
-			fprintf(stderr, "Usage: /send <message>\n");
+		// Message d'usage s'il manque le pseudo ou le nom du fichier
+		char* sp = strchr(arg, ' ');
+		if (*arg == '\0' || sp == NULL || sp == arg || *(sp + 1) == '\0') {
+			fprintf(stderr, "Usage: /send <nickname> <file>\n");
 			return (enum msg_type)-1;
 		}
 		memmove(buffer, arg, strlen(arg) + 1);
@@ -233,6 +268,9 @@ int handle_server(int sockfd)
 		return -1;
 	} else {
 		printf("%s\n\n", payload_str);
+		// Demande de transfert reçue : on mémorise l'émetteur et on attend Y/N
+		if (msg_recieved.type == FILE_REQUEST && msg_recieved.infos[0] != '\0')
+			snprintf(pending_sender, sizeof(pending_sender), "%s", msg_recieved.infos);
 	}
 
 	free(payload);

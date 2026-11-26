@@ -34,6 +34,8 @@ void handle_nickname_infos(int sockfd, struct message *msg);
 void handle_unicast_send(int sockfd, struct message *msg, const char *payload);
 void handle_broadcast_send(int sockfd, struct message *msg, const char *payload);
 void handle_echo_send(int sockfd, struct message *msg, const char *payload);
+void handle_file_request(int sockfd, struct message *msg, const char *payload);
+void handle_file_answer(int sockfd, struct message *msg);
 
 // Fonctions utiles pour handle_nickname_new
 void change_nickname(int sockfd, char* nickname);
