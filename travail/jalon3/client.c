@@ -141,13 +141,16 @@ static int parse_nickname(const char* buffer, char* nick){
 enum msg_type handle_command(int sockfd, char* buffer){
 	if (strcmp(buffer, "/quit\n") == 0) {
 		return (enum msg_type)MULTICAST_QUIT;
+
 	} else if (strncmp(buffer, "/nick", 5) == 0 && (buffer[5] == ' ' || buffer[5] == '\n' || buffer[5] == '\0')) {
 		char nick[NICK_LEN];
 		if (parse_nickname(buffer, nick) < 0)
 			return (enum msg_type)-1;
 		return (enum msg_type)NICKNAME_NEW;
+
 	} else if (strcmp(buffer, "/who\n") == 0) {
 		return (enum msg_type)NICKNAME_LIST;
+
 	} else if (strncmp(buffer, "/whois", 6) == 0 && (buffer[6] == '\0' || buffer[6] == ' ')) {
 		// Ne garder dans le buffer que l'argument (le pseudo) après "/whois "
 		char* arg = buffer + 6;
@@ -183,6 +186,19 @@ enum msg_type handle_command(int sockfd, char* buffer){
 		}
 		memmove(buffer, arg, strlen(arg) + 1);
 		return (enum msg_type)UNICAST_SEND;
+
+	} else if (strncmp(buffer, "/send", 5) == 0 && (buffer[5] == '\0' || buffer[5] == ' ' || buffer[5] == '\n')) {
+		char* arg = buffer + 5;
+		if (*arg == ' ')
+			arg++;
+		arg[strcspn(arg, "\n")] = '\0';
+		// Message d'usage si aucun message n'est fourni
+		if (*arg == '\0') {
+			fprintf(stderr, "Usage: /send <message>\n");
+			return (enum msg_type)-1;
+		}
+		memmove(buffer, arg, strlen(arg) + 1);
+		return (enum msg_type)FILE_REQUEST;
 	}
 
 	return (enum msg_type)ECHO_SEND;
