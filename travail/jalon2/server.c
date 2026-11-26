@@ -11,26 +11,11 @@
 #include <unistd.h>
 
 #include "common.h"
-#include "msg_struct.h"
+// #include "msg_struct.h"
+#include "commands.h"
 
 #define BACKLOG 10
 #define MAX_CONN 20
-
-/*
- * Le serveur doit conserver pour chaque client :
- * - le descripteur de socket
- * - l'adresse et le port du client
- * - la longueur de l'adresse (pour le port)
- * - un pointeur vers le client suivant dans la liste chaînée
- */
-struct client
-{
-	int fd;
-	struct sockaddr_storage addr;
-	socklen_t addr_len;
-	struct client *next;
-	char nickname[NICK_LEN];
-};
 
 struct client *clients = NULL;
 
@@ -68,18 +53,6 @@ void free_clients()
 {
 	while (clients != NULL)
 		remove_client(clients->fd);
-}
-
-int is_nickname_available(const char *nickname)
-{
-	struct client *c = clients;
-	while (c != NULL)
-	{
-		if (strcmp(c->nickname, nickname) == 0)
-			return 0;
-		c = c->next;
-	}
-	return 1;
 }
 
 int handle_bind(char *serv_port)
@@ -134,31 +107,33 @@ int handle_command(int sockfd, struct message *msg)
 		case MULTICAST_QUIT:
 			printf("/quit received from client on fd %d\n", sockfd);
 			return -1;
+		case NICKNAME_NEW:
+			printf("/nick received from client on fd %d\n", sockfd);
+			handle_nickname_new(sockfd, msg);
+			break;
 		case NICKNAME_LIST:
 			printf("/who received from client on fd %d\n", sockfd);
+			handle_nickname_list(sockfd);
 			break;
 		case NICKNAME_INFOS:
 			printf("/whois received from client on fd %d\n", sockfd);
+			handle_nickname_infos(sockfd, msg);
 			break;
 		case UNICAST_SEND:
 			printf("/msg received from client on fd %d\n", sockfd);
+			handle_unicast_send(sockfd, msg);
+			break;
+		case BROADCAST_SEND:
+			printf("/broadcast received from client on fd %d\n", sockfd);
+			handle_broadcast_send(sockfd, msg);
 			break;
 		default:
+			// Case ECHO_SEND par défaut selon les consignes du jalon 2
+			printf("No commands (using echo) received from client on fd %d\n", sockfd);
+			handle_echo_send(sockfd, msg);
 			break;
 	}
-}
-
-void change_nickname(int sockfd, char* nickname){
-	struct client *c = clients;
-	while (c != NULL)
-	{
-		if (c->fd == sockfd)
-		{
-			strcpy(c->nickname, nickname);
-			return;
-		}
-		c = c->next;
-	}
+	return 0;
 }
 
 // Reçoit un message du client et le lui renvoie (ECHO).
@@ -180,44 +155,6 @@ int handle_message(int sockfd)
 		return -1;
 
 	printf("Received: %s\n", msg_recieved.infos);
-
-	if (msg_recieved.type == (enum msg_type)ECHO_SEND)
-	{
-		printf("Size: %d\n", size);
-		printf("Message to send: %d\n", msg_recieved.type);
-		if (send_next_message_size(sockfd, size) < 0 || send_message(sockfd, &msg_recieved, size) < 0)
-		{
-			printf("Error sending message to client on fd %d\n", sockfd);
-			return -1;
-		}
-		printf("Message sent!\n");
-	} else if (msg_recieved.type == (enum msg_type)NICKNAME_NEW) {
-		if(is_nickname_available(msg_recieved.infos)) {
-			// Ici, donner la confirmation au client que le nickname a été accepté
-			change_nickname(sockfd, msg_recieved.infos);
-			struct message msg;
-			msg.type = (enum msg_type)NICKNAME_NEW;
-			msg.pld_len = 0;
-			strcpy(msg.infos, msg_recieved.infos); // On renvoie le nickname pour informer le client que nickname enregistré
-			if (send_next_message_size(sockfd, sizeof(msg)) < 0 || send_message(sockfd, &msg, sizeof(msg)) < 0) {
-				printf("Error sending nickname acceptance to client on fd %d\n", sockfd);
-				return -1;
-			}
-			printf("New nickname request from client on fd %d: %s\n", sockfd, msg_recieved.infos);
-		} else {
-			// Ici, donner l'info au client que le nickname a été refusé
-			struct message msg;
-			msg.type = (enum msg_type)NICKNAME_NEW;
-			msg.pld_len = 0;
-			strcpy(msg.infos, "Nickname already taken");
-			if (send_next_message_size(sockfd, sizeof(msg)) < 0 || send_message(sockfd, &msg, sizeof(msg)) < 0) {
-				printf("Error sending nickname rejection to client on fd %d\n", sockfd);
-				return -1;
-			}
-			printf("Nickname %s is already taken for client on fd %d\n", msg_recieved.infos, sockfd);
-		}
-	}
-
 	return 0;
 }
 

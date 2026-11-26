@@ -8,7 +8,7 @@
 #define MSG_LEN 1024
 
 // Affiche les erreurs
-int die(int ret_value, char *msg)
+static inline int die(int ret_value, char *msg)
 {
 	if (ret_value < 0)
 	{
@@ -24,7 +24,7 @@ int die(int ret_value, char *msg)
 Toutes les fonctions retournent -1 en cas d'erreur ou de déconnexion de l'autre côté.*/
 
 // Envoie de la taille du message
-int send_next_message_size(int sockfd, int size)
+static inline int send_next_message_size(int sockfd, int size)
 {
 	int bytes_sent = 0;
 	int ret = 0;
@@ -40,7 +40,7 @@ int send_next_message_size(int sockfd, int size)
 }
 
 // Envoie du message en fonctione de la taille spécifiée
-int send_message(int sockfd, void *buf, int size)
+static inline int send_message(int sockfd, void *buf, int size)
 {
 	int bytes_sent = 0;
 	int ret = 0;
@@ -56,7 +56,7 @@ int send_message(int sockfd, void *buf, int size)
 }
 
 // Côté serveur, réception de la taille du futur message
-int recv_next_message_size(int sockfd, int *size)
+static inline int recv_next_message_size(int sockfd, int *size)
 {
 	int bytes_read = 0;
 	int ret = 0;
@@ -72,7 +72,7 @@ int recv_next_message_size(int sockfd, int *size)
 }
 
 // Côté serveur, réception du message en fonction de la taille spécifiée
-int recv_message(int sockfd, void *buf, int size)
+static inline int recv_message(int sockfd, void *buf, int size)
 {
 	int bytes_read = 0;
 	int ret = 0;

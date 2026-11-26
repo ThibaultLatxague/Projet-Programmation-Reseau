@@ -60,7 +60,7 @@ void handle_send(int sockfd, struct message* msg){
 }
 
 void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* user_input){
-	if(type == NICKNAME_LIST || type == BROADCAST_SEND){
+	if(type == NICKNAME_LIST){
 		msg->pld_len = 0;
 		strcpy(msg->infos, "");
 	} else if (type == NICKNAME_NEW) {
@@ -189,7 +189,8 @@ int handle_server(int sockfd)
 		}
 	}
 
-	printf("Received: %s", msg_recieved.infos);
+	printf("Received: %s\n", msg_recieved.infos);
+	return 0;
 }
 
 // Index des fds surveillés par poll
