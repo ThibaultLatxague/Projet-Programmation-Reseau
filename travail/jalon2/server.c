@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -26,12 +27,20 @@ void add_client(int fd, struct sockaddr_storage *addr, socklen_t addr_len)
 	c->fd = fd;
 	c->addr = *addr;
 	c->addr_len = addr_len;
-	strcpy(c->time_of_connexion, "unknown");
-	strcpy(c->ip_address, "unknown");
-	strcpy(c->port_number, "unknown");
+	// CORRECTION (whois côté serveur) : date, IP et port viennent du serveur
+	// On fait ça côté serveur pour s'assurer de l'exactitude des données
+	time_t now = time(NULL);
+	strftime(c->time_of_connexion, sizeof(c->time_of_connexion), "%Y/%m/%d@%H:%M", localtime(&now));
+	if (getnameinfo((struct sockaddr *)addr, addr_len,
+					c->ip_address, sizeof(c->ip_address),
+					c->port_number, sizeof(c->port_number),
+					NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+	{
+		strcpy(c->ip_address, "unknown");
+		strcpy(c->port_number, "unknown");
+	}
 
 	// Pseudo temporaire "user<N>" où N s'incrémente à chaque connexion
-	// (on saute les pseudos déjà pris, par exemple choisis avec /nick)
 	static int connection_count = 0;
 	do
 		snprintf(c->nickname, sizeof(c->nickname), "user%d", ++connection_count);

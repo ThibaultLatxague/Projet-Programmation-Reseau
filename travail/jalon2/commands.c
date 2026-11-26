@@ -42,15 +42,7 @@ void handle_client_hello(int sockfd, const char *payload)
         c = c->next;
     if (c == NULL)
         return;
-
-    char buf[MSG_LEN];
-    snprintf(buf, sizeof(buf), "%s", payload);
-    char *time_s = strtok(buf, "|");
-    char *ip_s = strtok(NULL, "|");
-    char *port_s = strtok(NULL, "|");
-    if (time_s) snprintf(c->time_of_connexion, sizeof(c->time_of_connexion), "%s", time_s);
-    if (ip_s)   snprintf(c->ip_address, sizeof(c->ip_address), "%s", ip_s);
-    if (port_s) snprintf(c->port_number, sizeof(c->port_number), "%s", port_s);
+    (void)payload; // date/IP/port sont déjà renseignés par le serveur dans add_client()
 
     char message_to_send[1024];
     snprintf(message_to_send, sizeof(message_to_send),
@@ -59,10 +51,36 @@ void handle_client_hello(int sockfd, const char *payload)
         printf("Error sending welcome message to client on fd %d\n", sockfd);
 }
 
+// Pseudo valide : 1 à NICK_LEN-1 caractères, uniquement lettres et chiffres
+static int is_nickname_valid(const char *nick)
+{
+    size_t len = strlen(nick);
+    if (len == 0 || len >= NICK_LEN)
+        return 0;
+    for (size_t i = 0; i < len; i++)
+    {
+        char ch = nick[i];
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')))
+            return 0;
+    }
+    return 1;
+}
+
 void handle_nickname_new(int sockfd, struct message *msg)
 {
+    // le serveur revalide le pseudo
+    if (!is_nickname_valid(msg->infos)) {
+        if (send_response(sockfd, NICKNAME_NEW, "", "[Server] : /!\\ Error : Invalid nickname (1 to 127 letters or digits only)") < 0)
+            printf("Error sending nickname rejection to client on fd %d\n", sockfd);
+        return;
+    }
+    // Erreur personnalisée si le client redemande le pseudo qu'il possède déjà
+    if (strcmp(nickname_of(sockfd), msg->infos) == 0) {
+        if (send_response(sockfd, NICKNAME_NEW, "", "[Server] : /!\\ Error : You already use this nickname") < 0)
+            printf("Error sending nickname rejection to client on fd %d\n", sockfd);
+        return;
+    }
     if(is_nickname_available(msg->infos)) {
-        // Ici, donner la confirmation au client que le nickname a été accepté
         change_nickname(sockfd, msg->infos);
         char message_to_send[1024];
         snprintf(message_to_send, sizeof(message_to_send), "[Server] : Welcome on the chat %s", msg->infos);

@@ -47,10 +47,19 @@ int protocol_send_message(int socket_fd, const struct message *message, const vo
 {
     if (!protocol_validate_message(message) || (message->pld_len > 0 && payload == NULL))
         return -1;
-    if (protocol_send_all(socket_fd, &message->type, sizeof(message->type)) < 0 ||
-        protocol_send_all(socket_fd, &message->pld_len, sizeof(message->pld_len)) < 0 ||
-        protocol_send_all(socket_fd, message->nick_sender, sizeof(message->nick_sender)) < 0 ||
-        protocol_send_all(socket_fd, message->infos, sizeof(message->infos)) < 0)
+    /* On envoie les octets de la struct message d'un
+     * seul bloc, dans l'ordre de la consigne (pld_len, nick_sender, type,
+     * infos), au lieu de champ par champ dans un ordre différent.
+     * On passe par une copie mise à zéro pour que les octets de padding de la
+     * structure et la fin des chaînes ne contiennent pas de données
+     * non initialisées, et pour garantir que les chaînes sont terminées par '\0'. */
+    struct message wire;
+    memset(&wire, 0, sizeof(wire));
+    wire.pld_len = message->pld_len;
+    wire.type = message->type;
+    memcpy(wire.nick_sender, message->nick_sender, NICK_LEN - 1);
+    memcpy(wire.infos, message->infos, INFOS_LEN - 1);
+    if (protocol_send_all(socket_fd, &wire, sizeof(wire)) < 0)
         return -1;
     if (message->pld_len > 0 && protocol_send_all(socket_fd, payload, (size_t)message->pld_len) < 0)
         return -1;
@@ -62,10 +71,7 @@ int protocol_recv_message(int socket_fd, struct message *message, void **payload
     if (message == NULL || payload == NULL)
         return -1;
     *payload = NULL;
-    if (protocol_recv_all(socket_fd, &message->type, sizeof(message->type)) < 0 ||
-        protocol_recv_all(socket_fd, &message->pld_len, sizeof(message->pld_len)) < 0 ||
-        protocol_recv_all(socket_fd, message->nick_sender, sizeof(message->nick_sender)) < 0 ||
-        protocol_recv_all(socket_fd, message->infos, sizeof(message->infos)) < 0)
+    if (protocol_recv_all(socket_fd, message, sizeof(*message)) < 0)
         return -1;
     if (!protocol_validate_message(message))
         return -1;

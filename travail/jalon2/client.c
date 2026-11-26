@@ -4,34 +4,18 @@
 
 static int parse_nickname(const char* buffer, char* nick);
 
-// Envoie au serveur, juste après la connexion, l'heure de connexion, l'adresse IP
-// et le port locaux du client sous la forme "heure|ip|port" (type CLIENT_HELLO).
+// Prévient le serveur que la connexion est établie (type CLIENT_HELLO) pour qu'il
+// réponde par le message de bienvenue.
+// CORRECTION (whois côté serveur) : le client n'envoie plus sa date/IP/port. Le
+// serveur les déduit lui-même de accept() : un client ne peut plus les falsifier.
 static void send_hello(int sfd)
 {
-	struct sockaddr_storage local;
-	socklen_t local_len = sizeof(local);
-	char ip[64] = "unknown";
-	char port[64] = "unknown";
-	char date[64];
-	char payload[MSG_LEN];
-
-	if (getsockname(sfd, (struct sockaddr *)&local, &local_len) == 0)
-	{
-		// Remplit local avec l'adresse et le port locaux choisis par l'OS
-		getnameinfo((struct sockaddr *)&local, local_len, ip, sizeof(ip), port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV);
-	}
-
-	time_t now = time(NULL);
-	strftime(date, sizeof(date), "%Y/%m/%d@%H:%M:%S", localtime(&now));
-
-	snprintf(payload, sizeof(payload), "%s|%s|%s", date, ip, port);
-
 	struct message msg = {0};
 	msg.type = CLIENT_HELLO;
-	msg.pld_len = (int)strlen(payload);
-	if (protocol_send_message(sfd, &msg, payload) < 0)
+	msg.pld_len = 0;
+	if (protocol_send_message(sfd, &msg, NULL) < 0)
 	{
-		fprintf(stderr, "Could not send connection infos to server\n");
+		fprintf(stderr, "Could not send hello to server\n");
 	}
 }
 
@@ -71,7 +55,12 @@ int handle_connect(char *srv_addr, char *srv_port)
 // Retourne -1 si le client doit s'arrêter (/quit ou stdin fermée).
 int handle_message(int sockfd)
 {
-	struct message* msg = malloc(sizeof(struct message));
+	// CORRECTION (octets non initialisés) : calloc au lieu de malloc, sinon les
+	// champs non remplis de la struct (infos, nick_sender...) contiennent des
+	// données aléatoires de la mémoire.
+	struct message* msg = calloc(1, sizeof(struct message));
+	if (msg == NULL)
+		return -1;
 	char* payload = handle_stdin(sockfd);
 	enum msg_type type = handle_command(sockfd, payload);
 	if ((int)type < 0) {
@@ -104,6 +93,8 @@ void handle_struct(int sockfd, struct message* msg, enum msg_type type, char* pa
 		char* space = strchr(payload, ' ');
 		if (space != NULL) {
 			size_t nick_len = space - payload;
+			if (nick_len >= INFOS_LEN)
+				nick_len = INFOS_LEN - 1; // évite de déborder de msg->infos
 			strncpy(msg->infos, payload, nick_len);
 			msg->infos[nick_len] = '\0';
 			memmove(payload, space + 1, strlen(space + 1) + 1); // décaler pour retirer le pseudo
@@ -166,19 +157,30 @@ enum msg_type handle_command(int sockfd, char* buffer){
 		memmove(buffer, arg, strlen(arg) + 1);
 		return (enum msg_type)NICKNAME_INFOS;
 
-	} else if (strncmp(buffer, "/msgall", 7) == 0 && (buffer[7] == '\0' || buffer[7] == ' ')) {
+	} else if (strncmp(buffer, "/msgall", 7) == 0 && (buffer[7] == '\0' || buffer[7] == ' ' || buffer[7] == '\n')) {
 		char* arg = buffer + 7;
 		if (*arg == ' ')
 			arg++;
 		arg[strcspn(arg, "\n")] = '\0';
+		// Message d'usage si aucun message n'est fourni
+		if (*arg == '\0') {
+			fprintf(stderr, "Usage: /msgall <message>\n");
+			return (enum msg_type)-1;
+		}
 		memmove(buffer, arg, strlen(arg) + 1);
 		return (enum msg_type)BROADCAST_SEND;
 
-	} else if (strncmp(buffer, "/msg", 4) == 0 && (buffer[4] == '\0' || buffer[4] == ' ')) {
+	} else if (strncmp(buffer, "/msg", 4) == 0 && (buffer[4] == '\0' || buffer[4] == ' ' || buffer[4] == '\n')) {
 		char* arg = buffer + 4;
 		if (*arg == ' ')
 			arg++;
 		arg[strcspn(arg, "\n")] = '\0';
+		// Message d'usage s'il manque le pseudo ou le texte ("/msg", "/msg Bob")
+		char* sp = strchr(arg, ' ');
+		if (*arg == '\0' || sp == NULL || sp == arg || *(sp + 1) == '\0') {
+			fprintf(stderr, "Usage: /msg <nickname> <message>\n");
+			return (enum msg_type)-1;
+		}
 		memmove(buffer, arg, strlen(arg) + 1);
 		return (enum msg_type)UNICAST_SEND;
 	}
