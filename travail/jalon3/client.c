@@ -269,6 +269,76 @@ int handle_server(int sockfd) {
     return 0;
 }
 
+/**
+ * @brief Envoie le fichier indiqué par path sur la socket déjà connectée peer_fd.
+ * @param peer_fd Le descripteur de la socket du destinataire
+ * @param path Le chemin vers le fichier à envoyer
+ * @param filename Le nom du fichier
+ * @param sender_nick Le nickname de l'expéditeur
+ * @return 0 en cas de succès et -1 en cas d'erreur.
+ */
+int send_file_chunks(int peer_fd, const char *path, const char *filename, const char *sender_nick) {
+    struct message msg = {0};
+
+    if (path == NULL || filename == NULL || filename[0] == '\0' || strlen(filename) >= sizeof(msg.infos)) {
+        printf("Invalid file path or filename\n");
+        return -1;
+    }
+
+    if (sender_nick != NULL && strlen(sender_nick) >= sizeof(msg.nick_sender)) {
+        printf("Invalid sender nickname\n");
+        return -1;
+    }
+
+    int file_fd = open(path, O_RDONLY);
+    if (file_fd < 0) {
+        perror("open");
+        return -1;
+    }
+
+    msg.type = FILE_SEND;
+    strcpy(msg.infos, filename);
+    if (sender_nick != NULL)
+        strcpy(msg.nick_sender, sender_nick);
+
+    unsigned char chunk[MSG_LEN];
+
+    while (1) {
+        int n = read(file_fd, chunk, sizeof(chunk));
+
+        if (n < 0 && errno == EINTR)
+            continue;
+        if (n < 0) {
+            perror("read");
+            close(file_fd);
+            return -1;
+        }
+        if (n == 0)
+            break;
+
+        msg.pld_len = n;
+
+        if (protocol_send_message(peer_fd, &msg, chunk) < 0) {
+            printf("Could not send file chunk\n");
+            close(file_fd);
+            return -1;
+        }
+    }
+
+    if (close(file_fd) < 0) {
+        perror("close");
+        return -1;
+    }
+
+    msg.pld_len = 0;
+    if (protocol_send_message(peer_fd, &msg, NULL) < 0) {
+        printf("Could not send end-of-file message\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 // Index des fds surveillés par poll
 enum {
     IDX_STDIN = 0,
