@@ -157,7 +157,7 @@ int handle_command(int sockfd, struct message *msg, const char *payload)
 		case FILE_ACCEPT:
 		case FILE_REJECT:
 			printf("File answer received from client on fd %d\n", sockfd);
-			handle_file_answer(sockfd, msg);
+			handle_file_answer(sockfd, msg, payload);
 			break;
 		default:
 			// Case ECHO_SEND par défaut selon les consignes du jalon 2

@@ -222,25 +222,38 @@ void handle_file_request(int sockfd, struct message *msg, const char *payload){
 
 // Réponse du destinataire (FILE_ACCEPT / FILE_REJECT) : msg->infos = pseudo de l'émetteur initial.
 // On la relaie à l'émetteur.
-void handle_file_answer(int sockfd, struct message *msg)
+void handle_file_answer(int sockfd, struct message *msg, const char *payload)
 {
     char text[1024];
     const char *answerer = nickname_of(sockfd);
-    if (msg->type == FILE_ACCEPT)
-        snprintf(text, sizeof(text), "[Server] : %s accepted the file transfer", answerer);
-    else
+    printf("[DEBUG][serveur] %s de '%s' pour l'emetteur '%s' : pld_len=%d, payload recu='%s'\n",
+           msg->type == FILE_ACCEPT ? "FILE_ACCEPT" : "FILE_REJECT", answerer, msg->infos,
+           msg->pld_len, payload ? payload : "(aucun)");
+    // Acceptation : on relaie l'adresse "IP:port" du récepteur (le client affiche lui-même le message).
+    // Refus : on relaie un texte.
+    const char *to_send = text;
+    if (msg->type == FILE_ACCEPT) {
+        if (payload == NULL || payload[0] == '\0') {
+            send_response(sockfd, FILE_REQUEST, "", "[Server] : /!\\ Error : Missing address in file acceptance");
+            return;
+        }
+        to_send = payload;
+    } else {
         snprintf(text, sizeof(text), "[Server] : %s declined the file transfer", answerer);
+    }
 
     for (struct client *c = clients; c != NULL; c = c->next)
     {
         if (c->nickname[0] != '\0' && strcmp(c->nickname, msg->infos) == 0)
         {
-            if (send_response(c->fd, msg->type, answerer, text) < 0)
+            printf("[DEBUG][serveur] relais vers l'emetteur (fd %d) : '%s'\n", c->fd, to_send);
+            if (send_response(c->fd, msg->type, answerer, to_send) < 0)
                 printf("Error sending file answer to client on fd %d\n", c->fd);
             return;
         }
     }
-    send_response(sockfd, msg->type, "", "[Server] : /!\\ Error : User not found");
+    // Type FILE_REQUEST pour que le client affiche l'erreur sans la prendre pour une réponse
+    send_response(sockfd, FILE_REQUEST, "", "[Server] : /!\\ Error : User not found");
 }
 
 
