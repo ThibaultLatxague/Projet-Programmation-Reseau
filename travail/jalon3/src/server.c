@@ -14,7 +14,7 @@
 #include "common.h"
 #include "commands.h"
 #include "client_list.h"
-#include "../include/protocol.h"
+#include "protocol.h"
 
 #define BACKLOG 10
 #define MAX_CONN 20

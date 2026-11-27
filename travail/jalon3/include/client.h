@@ -15,7 +15,7 @@
 
 #include "common.h"
 #include "msg_struct.h"
-#include "../include/protocol.h"
+#include "protocol.h"
 #include "client_commands.h"
 #include "file_transfer.h"
 

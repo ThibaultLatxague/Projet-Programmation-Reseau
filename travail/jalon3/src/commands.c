@@ -4,7 +4,7 @@
 #include "common.h"
 #include "msg_struct.h"
 #include "commands.h"
-#include "../include/protocol.h"
+#include "protocol.h"
 
 static int send_response(int sockfd, enum msg_type type, const char *infos, const char *payload)
 {
