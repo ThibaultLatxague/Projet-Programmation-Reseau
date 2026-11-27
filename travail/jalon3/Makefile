@@ -2,13 +2,18 @@ CFLAGS=-Wall
 CFLAGS+=-I. -I../include
 #LDFLAGS=-lpthread
 BUILD_DIR=build
+SEND_DIR=$(BUILD_DIR)/to_send
+RECEIVED_DIR=$(BUILD_DIR)/received
 CLIENT=$(BUILD_DIR)/client
 SERVER=$(BUILD_DIR)/server
 OBJECTS=$(BUILD_DIR)/client.o $(BUILD_DIR)/server.o $(BUILD_DIR)/commands.o $(BUILD_DIR)/protocol.o
 
-all: $(CLIENT) $(SERVER)
+all: $(CLIENT) $(SERVER) $(SEND_DIR) $(RECEIVED_DIR)
 
 $(BUILD_DIR):
+	mkdir -p $@
+
+$(SEND_DIR) $(RECEIVED_DIR): | $(BUILD_DIR)
 	mkdir -p $@
 
 $(CLIENT): $(BUILD_DIR)/client.o $(BUILD_DIR)/protocol.o

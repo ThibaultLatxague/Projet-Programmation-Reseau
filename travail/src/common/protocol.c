@@ -73,7 +73,9 @@ int protocol_recv_message(int socket_fd, struct message *message, void **payload
     *payload = NULL;
     if (protocol_recv_all(socket_fd, message, sizeof(*message)) < 0)
         return -1;
-    if (!protocol_validate_message(message))
+    if (!protocol_validate_message(message) ||
+        memchr(message->nick_sender, '\0', sizeof(message->nick_sender)) == NULL ||
+        memchr(message->infos, '\0', sizeof(message->infos)) == NULL)
         return -1;
     if (message->pld_len > 0) {
         char *data = malloc((size_t)message->pld_len + 1);
