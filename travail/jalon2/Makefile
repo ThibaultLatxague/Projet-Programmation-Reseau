@@ -20,7 +20,7 @@ $(SERVER): $(BUILD_DIR)/server.o $(BUILD_DIR)/commands.o $(BUILD_DIR)/protocol.o
 $(BUILD_DIR)/client.o: client.c client.h common.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD_DIR)/server.o: server.c common.h commands.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
+$(BUILD_DIR)/server.o: server.c server.h common.h commands.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD_DIR)/commands.o: commands.c common.h commands.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)

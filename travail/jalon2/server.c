@@ -1,19 +1,4 @@
-#include <arpa/inet.h>
-#include <errno.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#include "common.h"
-#include "commands.h"
-#include "../include/protocol.h"
+#include "server.h"
 
 #define BACKLOG 10
 #define MAX_CONN 20
@@ -162,7 +147,7 @@ int handle_command(int sockfd, struct message *msg, const char *payload)
 // Reçoit un message du client et le lui renvoie (ECHO).
 // Retourne -1 si le client se déconnecte ou envoie /quit.
 int handle_message(int sockfd)
-{ 
+{
 	struct message msg_received;
 	void *payload = NULL;
 	if (protocol_recv_message(sockfd, &msg_received, &payload) < 0)
