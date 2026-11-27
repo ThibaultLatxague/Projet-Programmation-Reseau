@@ -16,15 +16,6 @@ static int send_response(int sockfd, enum msg_type type, const char *infos, cons
 	return protocol_send_message(sockfd, &response, payload);
 }
 
-// Pseudo actuel du client associé à sockfd ("" s'il est introuvable)
-static const char *nickname_of(int sockfd)
-{
-    for (struct client *c = clients; c != NULL; c = c->next)
-        if (c->fd == sockfd)
-            return c->nickname;
-    return "";
-}
-
 // Premier message d'un client : on lui répond par le message de bienvenue
 void handle_client_hello(int sockfd)
 {
@@ -35,8 +26,7 @@ void handle_client_hello(int sockfd)
         return;
 
     char message_to_send[1024];
-    snprintf(message_to_send, sizeof(message_to_send),
-             "[Server] : Welcome on the chat, your temporary nickname is %s", c->nickname);
+    snprintf(message_to_send, sizeof(message_to_send), "[Server] : Welcome on the chat, your temporary nickname is %s", c->nickname);
     if (send_response(sockfd, CLIENT_HELLO, "", message_to_send) < 0)
         printf("Error sending welcome message to client on fd %d\n", sockfd);
 }
@@ -227,31 +217,6 @@ void handle_file_answer(int sockfd, struct message *msg, const char *payload)
 
 
 /* -------------- Fonctions utiles pour commandes -------------- */
-
-void change_nickname(int sockfd, char* nickname){
-	struct client *c = clients;
-	while (c != NULL)
-	{
-		if (c->fd == sockfd)
-		{
-			strcpy(c->nickname, nickname);
-			return;
-		}
-		c = c->next;
-	}
-}
-
-int is_nickname_available(const char *nickname)
-{
-	struct client *c = clients;
-	while (c != NULL)
-	{
-		if (strcmp(c->nickname, nickname) == 0)
-			return 0;
-		c = c->next;
-	}
-	return 1;
-}
 
 char* get_client(const char* nickname){
     static char client_info[1024];

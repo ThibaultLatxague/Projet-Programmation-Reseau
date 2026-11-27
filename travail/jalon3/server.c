@@ -13,93 +13,74 @@
 
 #include "common.h"
 #include "commands.h"
+#include "client_list.h"
 #include "../include/protocol.h"
 
 #define BACKLOG 10
 #define MAX_CONN 20
 
-struct client *clients = NULL;
+// Positionné par le gestionnaire de signal pour arrêter le serveur
+static volatile sig_atomic_t stop_requested = 0;
 
-void add_client(int fd, struct sockaddr_storage *addr, socklen_t addr_len)
+static void on_stop_signal(int sig)
 {
-	struct client *c = malloc(sizeof(struct client));
-	die(c == NULL ? -1 : 0, "malloc()");
-	c->fd = fd;
-	c->addr = *addr;
-	c->addr_len = addr_len;
-	// CORRECTION (whois côté serveur) : date, IP et port viennent du serveur
-	// On fait ça côté serveur pour s'assurer de l'exactitude des données
-	time_t now = time(NULL);
-	strftime(c->time_of_connexion, sizeof(c->time_of_connexion), "%Y/%m/%d@%H:%M", localtime(&now));
-	if (getnameinfo((struct sockaddr *)addr, addr_len,
-					c->ip_address, sizeof(c->ip_address),
-					c->port_number, sizeof(c->port_number),
-					NI_NUMERICHOST | NI_NUMERICSERV) != 0)
-	{
-		strcpy(c->ip_address, "unknown");
-		strcpy(c->port_number, "unknown");
-	}
-
-	// Pseudo temporaire "user<N>" où N s'incrémente à chaque connexion
-	static int connection_count = 0;
-	do
-		snprintf(c->nickname, sizeof(c->nickname), "user%d", ++connection_count);
-	while (!is_nickname_available(c->nickname));
-
-	c->next = clients;
-	clients = c;
+	(void)sig;
+	stop_requested = 1;
 }
 
-// Ferme la socket du client et libère son maillon
-void remove_client(int fd)
+static void install_signal_handlers(void)
 {
-	struct client **p = &clients;
-	while (*p != NULL)
-	{
-		if ((*p)->fd == fd)
-		{
-			struct client *to_free = *p;
-			*p = to_free->next;
-			close(to_free->fd);
-			free(to_free);
-			return;
-		}
-		p = &(*p)->next;
-	}
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = on_stop_signal; // sans SA_RESTART : poll() est interrompu
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGTERM, &sa, NULL);
+	// Un write sur une socket fermée par un client ne doit pas tuer le serveur
+	signal(SIGPIPE, SIG_IGN);
 }
 
-int handle_bind(char *serv_port)
+// Crée la socket d'écoute pour une famille donnée (-1 en cas d'échec).
+// En IPv6, la socket accepte aussi les clients IPv4 (IPV6_V6ONLY désactivé).
+static int bind_with_family(const char *serv_port, int family)
 {
 	struct addrinfo hints, *result, *rp;
-	int sfd;
+	int sfd = -1;
+
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_UNSPEC;
+	hints.ai_family = family;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
-	int gai_ret = getaddrinfo(NULL, serv_port, &hints, &result);
-	die(gai_ret != 0 ? -1 : 0, "getaddrinfo()");
+	if (getaddrinfo(NULL, serv_port, &hints, &result) != 0)
+		return -1;
 	for (rp = result; rp != NULL; rp = rp->ai_next)
 	{
 		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 		if (sfd == -1)
-		{
 			continue;
-		}
 		int opt = 1;
-		int ret = setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-		die(ret, "on setsockopt");
+		int off = 0;
+		setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+		if (family == AF_INET6)
+			setsockopt(sfd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
 		if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0)
-		{
 			break;
-		}
 		close(sfd);
+		sfd = -1;
 	}
-	if (rp == NULL)
+	freeaddrinfo(result);
+	return sfd;
+}
+
+int handle_bind(char *serv_port)
+{
+	int sfd = bind_with_family(serv_port, AF_INET6);
+	if (sfd < 0)
+		sfd = bind_with_family(serv_port, AF_INET);
+	if (sfd < 0)
 	{
 		fprintf(stderr, "Could not bind\n");
 		exit(EXIT_FAILURE);
 	}
-	freeaddrinfo(result);
 	return sfd;
 }
 
@@ -180,6 +161,48 @@ int handle_message(int sockfd)
 	return 0;
 }
 
+// Accepte une nouvelle connexion et lui attribue un slot libre de fds (indices >= 1)
+static void accept_new_client(int listen_fd, struct pollfd *fds)
+{
+	struct sockaddr_storage client_addr;
+	socklen_t client_addr_len = sizeof(client_addr);
+	int new_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+	if (new_fd < 0)
+	{
+		perror("accept()");
+		return;
+	}
+	printf("New socket on fd %d\n", new_fd);
+
+	for (int j = 1; j < MAX_CONN; j++)
+	{
+		if (fds[j].fd == -1)
+		{
+			fds[j].fd = new_fd;
+			fds[j].events = POLLIN;
+			fds[j].revents = 0;
+			add_client(new_fd, &client_addr, client_addr_len);
+			return;
+		}
+	}
+	fprintf(stderr, "Max connections reached, closing new connection\n");
+	close(new_fd);
+}
+
+// Traite les événements des sockets clientes (indices >= 1)
+static void serve_clients(struct pollfd *fds)
+{
+	for (int i = 1; i < MAX_CONN; i++)
+	{
+		if (fds[i].fd == -1)
+			continue;
+		if ((fds[i].revents & POLLIN) && handle_message(fds[i].fd) < 0)
+			disconnect_client(&fds[i]);
+		else if (!(fds[i].revents & POLLIN) && (fds[i].revents & (POLLHUP | POLLERR)))
+			disconnect_client(&fds[i]);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc != 2)
@@ -188,8 +211,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	// B2 : un write sur une socket fermée par un client ne doit pas tuer le serveur
-	signal(SIGPIPE, SIG_IGN);
+	install_signal_handlers();
 
 	int listen_fd = handle_bind(argv[1]);
 	die(listen(listen_fd, BACKLOG), "listen()");
@@ -201,54 +223,22 @@ int main(int argc, char *argv[])
 	fds[0].fd = listen_fd;
 	fds[0].events = POLLIN;
 
-	while (1)
+	while (!stop_requested)
 	{
-		int ret = poll(fds, MAX_CONN, -1);
-		if (ret < 0)
+		if (poll(fds, MAX_CONN, -1) < 0)
 		{
 			if (errno == EINTR)
 				continue;
-			die(ret, "poll");
+			perror("poll");
+			break;
 		}
-
-		for (int i = 0; i < MAX_CONN; i++)
-		{
-			if (i == 0 && (fds[i].revents & POLLIN))
-			{
-				struct sockaddr_storage client_addr;
-				socklen_t client_addr_len = sizeof(client_addr);
-				int new_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-				die(new_fd, "accepting");
-				printf("New socket on fd %d\n", new_fd);
-
-				int inserted = 0;
-				for (int j = 1; j < MAX_CONN; j++)
-				{
-					if (fds[j].fd == -1)
-					{
-						fds[j].fd = new_fd;
-						fds[j].events = POLLIN;
-						fds[j].revents = 0;
-						add_client(new_fd, &client_addr, client_addr_len);
-						inserted = 1;
-						break;
-					}
-				}
-				if (!inserted)
-				{
-					fprintf(stderr, "Max connections reached, closing new connection\n");
-					close(new_fd);
-				}
-			}
-			else if (i != 0 && fds[i].fd != -1 && (fds[i].revents & POLLIN))
-			{
-				if (handle_message(fds[i].fd) < 0)
-					disconnect_client(&fds[i]);
-			}
-			else if (i != 0 && fds[i].fd != -1 && (fds[i].revents & (POLLHUP | POLLERR)))
-			{
-				disconnect_client(&fds[i]);
-			}
-		}
+		if (fds[0].revents & POLLIN)
+			accept_new_client(listen_fd, fds);
+		serve_clients(fds);
 	}
+
+	// Arrêt propre : fermeture de toutes les sockets et libération de la liste
+	free_clients();
+	close(listen_fd);
+	return EXIT_SUCCESS;
 }

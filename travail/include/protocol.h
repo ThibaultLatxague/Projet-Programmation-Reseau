@@ -2,6 +2,7 @@
 #define PROTOCOL_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -15,6 +16,9 @@
 
 #include "common.h"
 #include "msg_struct.h"
+
+/* Taille maximale d'un payload applicatif (cf. protocole.md) */
+#define PROTO_MAX_PAYLOAD 65536
 
 struct message;
 

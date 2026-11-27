@@ -1,2 +1,8 @@
 /travail/jalon2/build/
-/travail/jalon3/build/
+*.o
+/travail/*/build/
+/travail/jalon1/client
+/travail/jalon1/server
+.resa1/
+received/
+to_send/

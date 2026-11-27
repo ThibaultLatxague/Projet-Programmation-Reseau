@@ -16,15 +16,14 @@
 #include "common.h"
 #include "msg_struct.h"
 #include "../include/protocol.h"
+#include "client_commands.h"
+#include "file_transfer.h"
 
-void handle_struct(struct message* msg, enum msg_type type, char* user_input);
-
+// Connexion au serveur (quitte le programme en cas d'échec)
 int handle_connect(char *srv_addr, char *srv_port);
 
+// Saisie clavier : retourne -1 si le client doit s'arrêter
 int handle_message(int sockfd);
 
+// Message du serveur : retourne -1 si le serveur s'est déconnecté
 int handle_server(int sockfd);
-
-enum msg_type handle_command(char* buffer);
-
-char* handle_stdin(void);

@@ -1,33 +1,32 @@
-CFLAGS=-Wall
+CFLAGS=-Wall -Wextra
 CFLAGS+=-I. -I../include
 BUILD_DIR=build
 CLIENT=$(BUILD_DIR)/client
 SERVER=$(BUILD_DIR)/server
-OBJECTS=$(BUILD_DIR)/client.o $(BUILD_DIR)/server.o $(BUILD_DIR)/commands.o $(BUILD_DIR)/protocol.o
+HEADERS=$(wildcard *.h) ../include/protocol.h
+
+CLIENT_OBJECTS=$(BUILD_DIR)/client.o $(BUILD_DIR)/client_commands.o $(BUILD_DIR)/file_transfer.o $(BUILD_DIR)/protocol.o
+SERVER_OBJECTS=$(BUILD_DIR)/server.o $(BUILD_DIR)/commands.o $(BUILD_DIR)/client_list.o $(BUILD_DIR)/protocol.o
 
 all: $(CLIENT) $(SERVER)
 
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(CLIENT): $(BUILD_DIR)/client.o $(BUILD_DIR)/protocol.o
+$(CLIENT): $(CLIENT_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(SERVER): $(BUILD_DIR)/server.o $(BUILD_DIR)/commands.o $(BUILD_DIR)/protocol.o
+$(SERVER): $(SERVER_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(BUILD_DIR)/client.o: client.c client.h common.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.c $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD_DIR)/server.o: server.c common.h commands.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
-
-$(BUILD_DIR)/commands.o: commands.c common.h commands.h msg_struct.h ../include/protocol.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
-
-$(BUILD_DIR)/protocol.o: ../src/common/protocol.c ../include/protocol.h common.h msg_struct.h | $(BUILD_DIR)
+$(BUILD_DIR)/protocol.o: ../src/common/protocol.c $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(CLIENT) $(SERVER) $(OBJECTS)
+	rm -f $(CLIENT) $(SERVER) $(CLIENT_OBJECTS) $(SERVER_OBJECTS)
 	rmdir $(BUILD_DIR) 2>/dev/null || true
+
+.PHONY: all clean

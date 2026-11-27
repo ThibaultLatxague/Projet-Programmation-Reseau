@@ -1,5 +1,9 @@
 #include "../../include/protocol.h"
 
+/* En-tête sur le réseau (cf. protocole.md), champ par champ :
+ * type (2 octets) | payload_len (4 octets) | nick_sender (128) | infos (128)
+ * Les entiers sont transmis en ordre réseau. */
+
 int protocol_send_all(int socket_fd, const void *buffer, size_t length)
 {
     const char *data = buffer;
@@ -38,30 +42,58 @@ int protocol_validate_message(const struct message *message)
 {
     return message != NULL &&
            message->pld_len >= 0 &&
-           message->pld_len <= MSG_LEN &&
-           message->type >= NICKNAME_NEW &&
-           message->type <= CLIENT_HELLO;
+           message->pld_len <= PROTO_MAX_PAYLOAD &&
+           (int)message->type >= (int)NICKNAME_NEW &&
+           (int)message->type <= (int)CLIENT_HELLO;
 }
 
 int protocol_send_message(int socket_fd, const struct message *message, const void *payload)
 {
     if (!protocol_validate_message(message) || (message->pld_len > 0 && payload == NULL))
         return -1;
-    /* On envoie les octets de la struct message d'un
-     * seul bloc, dans l'ordre de la consigne (pld_len, nick_sender, type,
-     * infos), au lieu de champ par champ dans un ordre différent.
-     * On passe par une copie mise à zéro pour que les octets de padding de la
-     * structure et la fin des chaînes ne contiennent pas de données
-     * non initialisées, et pour garantir que les chaînes sont terminées par '\0'. */
-    struct message wire;
-    memset(&wire, 0, sizeof(wire));
-    wire.pld_len = message->pld_len;
-    wire.type = message->type;
-    memcpy(wire.nick_sender, message->nick_sender, NICK_LEN - 1);
-    memcpy(wire.infos, message->infos, INFOS_LEN - 1);
-    if (protocol_send_all(socket_fd, &wire, sizeof(wire)) < 0)
+
+    /* Copies mises à zéro : les chaînes envoyées sont toujours terminées par '\0'
+     * et ne contiennent aucune donnée non initialisée. */
+    char nick[NICK_LEN] = {0};
+    char infos[INFOS_LEN] = {0};
+    memcpy(nick, message->nick_sender, NICK_LEN - 1);
+    memcpy(infos, message->infos, INFOS_LEN - 1);
+
+    uint16_t type = htons((uint16_t)message->type);
+    uint32_t length = htonl((uint32_t)message->pld_len);
+
+    if (protocol_send_all(socket_fd, &type, sizeof(type)) < 0 ||
+        protocol_send_all(socket_fd, &length, sizeof(length)) < 0 ||
+        protocol_send_all(socket_fd, nick, sizeof(nick)) < 0 ||
+        protocol_send_all(socket_fd, infos, sizeof(infos)) < 0)
         return -1;
     if (message->pld_len > 0 && protocol_send_all(socket_fd, payload, (size_t)message->pld_len) < 0)
+        return -1;
+    return 0;
+}
+
+/* Lit et valide l'en-tête. La longueur est contrôlée avant toute allocation. */
+static int recv_header(int socket_fd, struct message *message)
+{
+    uint16_t type;
+    uint32_t length;
+
+    memset(message, 0, sizeof(*message));
+    if (protocol_recv_all(socket_fd, &type, sizeof(type)) < 0 ||
+        protocol_recv_all(socket_fd, &length, sizeof(length)) < 0 ||
+        protocol_recv_all(socket_fd, message->nick_sender, NICK_LEN) < 0 ||
+        protocol_recv_all(socket_fd, message->infos, INFOS_LEN) < 0)
+        return -1;
+
+    type = ntohs(type);
+    length = ntohl(length);
+    if (length > PROTO_MAX_PAYLOAD || type > (uint16_t)CLIENT_HELLO)
+        return -1;
+    message->type = (enum msg_type)type;
+    message->pld_len = (int)length;
+
+    if (memchr(message->nick_sender, '\0', NICK_LEN) == NULL ||
+        memchr(message->infos, '\0', INFOS_LEN) == NULL)
         return -1;
     return 0;
 }
@@ -71,11 +103,7 @@ int protocol_recv_message(int socket_fd, struct message *message, void **payload
     if (message == NULL || payload == NULL)
         return -1;
     *payload = NULL;
-    if (protocol_recv_all(socket_fd, message, sizeof(*message)) < 0)
-        return -1;
-    if (!protocol_validate_message(message) ||
-        memchr(message->nick_sender, '\0', sizeof(message->nick_sender)) == NULL ||
-        memchr(message->infos, '\0', sizeof(message->infos)) == NULL)
+    if (recv_header(socket_fd, message) < 0)
         return -1;
     if (message->pld_len > 0) {
         char *data = malloc((size_t)message->pld_len + 1);
