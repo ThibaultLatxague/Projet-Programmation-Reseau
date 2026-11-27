@@ -374,6 +374,101 @@ int send_file_chunks(int peer_fd, const char *path, const char *filename, const 
     return 0;
 }
 
+/**
+ * @brief Envoie le fichier indiqué par path sur la socket déjà connectée peer_fd.
+ * @param peer_fd Le descripteur de la socket du destinataire
+ * @return 0 en cas de succès et -1 en cas d'erreur.
+ */
+int receive_file(int peer_fd) {
+
+    //creation du fichier
+    struct message msg;
+    void *payload = NULL;
+    int file_fd = -1;
+    long total_bytes = 0; // [DEBUG] total d'octets écrits
+
+    printf("[DEBUG][recepteur] receive_file : debut de reception sur la socket %d\n", peer_fd);
+
+    while (1) {
+        payload = NULL;
+
+        if (protocol_recv_message(peer_fd, &msg, &payload) < 0) {
+            printf("[DEBUG][recepteur] echec de lecture de l'en-tete (emetteur deconnecte ou message invalide)\n");
+            printf("Could not receive file message\n");
+            close(file_fd);
+            return -1;
+        }
+        printf("[DEBUG][recepteur] en-tete recu : type=%d (%s), pld_len=%d, infos='%s', nick_sender='%s'\n",
+               msg.type, msg_type_str[msg.type], msg.pld_len, msg.infos, msg.nick_sender);
+
+        if (msg.type != FILE_SEND) {
+            printf("[DEBUG][recepteur] type inattendu : %d (attendu FILE_SEND=%d)\n", msg.type, FILE_SEND);
+            printf("Could not receive file message\n");
+            close(peer_fd);
+            free(payload);
+            return -1;
+        }
+
+        if(msg.pld_len == 0) {
+            printf("[DEBUG][recepteur] message de fin de fichier (pld_len=0) recu, total=%ld octets\n", total_bytes);
+            const char* filename = strrchr(msg.infos, '/') ? strrchr(msg.infos, '/') + 1 : msg.infos;
+            file_fd = open(filename, O_WRONLY | O_CREAT | O_EXCL, 0644);
+            
+            break;
+        }
+
+        printf("[DEBUG][recepteur] read() du payload : %d octets lus sur %d attendus\n", n, msg.pld_len);
+        if (protocol_recv_message(peer_fd, payload, msg.pld_len) < 0) {
+            printf("[DEBUG][recepteur] echec de lecture du payload\n");
+            printf("Could not receive file chunk\n");
+            close(file_fd);
+            return -1;
+        }
+
+        printf("[DEBUG][recepteur] FILE_ACK : morceau de %d octets sur la socket %d\n", n, peer_fd);
+
+        if (file_fd <= 0) {
+            const char *filename = strrchr(msg.infos, '/');
+
+            if (filename)
+                filename++; // skip the '/'
+            else
+                filename = msg.infos;
+
+            printf("[DEBUG][recepteur] ouverture du fichier de sortie '%s' (infos recu='%s')\n", filename, msg.infos);
+            file_fd = open(filename, O_WRONLY | O_CREAT | O_EXCL, 0644);
+            printf("[DEBUG][recepteur] open() -> fd=%d\n", file_fd);
+            if (file_fd < 0) {
+                perror("open");
+                close(peer_fd);
+                return -1;
+            }
+        }
+
+        if (write(file_fd, payload, msg.pld_len) != msg.pld_len) {
+            perror("write");
+            close(file_fd);
+            close(peer_fd);
+            return -1;
+        }
+
+        total_bytes += msg.pld_len;
+        printf("[DEBUG][recepteur] %d octets ecrits dans fd=%d (cumul=%ld)\n", msg.pld_len, file_fd, total_bytes);
+    }
+
+    printf("[DEBUG][recepteur] fermeture du fichier (fd=%d) et de la socket %d\n", file_fd, peer_fd);
+    if (close(file_fd) < 0) {
+        perror("close");
+        return -1;
+    }
+
+    close(peer_fd);
+    printf("[DEBUG][recepteur] reception terminee : %ld octets recus\n", total_bytes);
+
+    return 0;
+}
+
+
 // Reçoit la réponse du serveur (taille puis chaîne).
 // Retourne -1 si le serveur s'est déconnecté.
 int handle_server(int sockfd) {
@@ -495,6 +590,7 @@ int handle_server(int sockfd) {
 enum {
     IDX_STDIN = 0,
     IDX_SOCK,
+    IDX_TRANSFER,
     NB_FDS
 };
 
@@ -515,8 +611,12 @@ int main(int argc, char *argv[]) {
     fds[IDX_SOCK].fd = sfd;
     fds[IDX_SOCK].events = POLLIN;
     fds[IDX_SOCK].revents = 0;
+    fds[IDX_TRANSFER].events = POLLIN;
+    fds[IDX_TRANSFER].revents = 0;
 
     while (1) {
+        fds[IDX_TRANSFER].fd = listen_fd; // Mise à jour de la socket d'écoute pour les transferts de fichiers
+
         int nready = poll(fds, NB_FDS, -1);
         if (nready < 0) {
             if (errno == EINTR)
@@ -533,6 +633,20 @@ int main(int argc, char *argv[]) {
         // Réponse du serveur
         if (fds[IDX_SOCK].revents & (POLLIN | POLLHUP | POLLERR)) {
             if (handle_server(sfd) < 0) {
+                printf("server disconnected\n");
+                break;
+            }
+        }
+
+        if(fds[IDX_TRANSFER].revents & POLLIN) {
+            printf("[DEBUG][recepteur] POLLIN sur la socket d'ecoute %d : un emetteur se connecte\n", listen_fd);
+            int peer_fd = accept(listen_fd, NULL, NULL);
+            printf("[DEBUG][recepteur] accept() -> peer_fd=%d\n", peer_fd);
+            if(receive_file(peer_fd) < 0)
+                printf("Erreur lors de la reception du fichier\n");
+            close(listen_fd);
+            listen_fd = -1;
+            if (peer_fd < 0) {
                 printf("server disconnected\n");
                 break;
             }
