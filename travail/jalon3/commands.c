@@ -194,6 +194,13 @@ void handle_file_request(int sockfd, struct message *msg, const char *payload){
 
     // Le pseudo de l'expéditeur est celui connu du serveur (pas celui envoyé par le client)
     snprintf(msg->nick_sender, sizeof(msg->nick_sender), "%s", nickname_of(sockfd));
+
+    // Vérification que le client n'envoie pas un fichier a lui-même
+    if (strcmp(msg->nick_sender, recipient_nickname) == 0) {
+        send_response(sockfd, FILE_REQUEST, "", "[Server] : /!\\ Error : Cannot send a file to yourself");
+        return;
+    }
+    
     char formatted_payload[1024];
     snprintf(formatted_payload, sizeof(formatted_payload), "[Server] : [%s] wants you to accept the transfer of the file named \"%s\". Do you accept? [Y/N]", msg->nick_sender, payload);
     payload = formatted_payload;

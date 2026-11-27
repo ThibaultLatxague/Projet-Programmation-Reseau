@@ -256,11 +256,12 @@ int handle_server(int sockfd) {
         if (msg_recieved.type == FILE_REQUEST && msg_recieved.infos[0] != '\0')
             snprintf(pending_sender, sizeof(pending_sender), "%s", msg_recieved.infos);
         if (msg_recieved.type == FILE_REJECT)
-            printf("File transfer request rejected by %s\n", msg_recieved.nick_sender);
+            printf("File transfer request rejected by %s\n", msg_recieved.infos);
         if (msg_recieved.type == FILE_ACCEPT) {
             // Ici, récupérer dans infos le pseudo de l'émetteur initial et dans le payload l'adresse et le port d'écoute du récepteur
             // Ensuite connecter à cette adresse/port pour envoyer le fichier
             // lancer le transfert de fichier
+            printf("File transfer request accepted by %s\n", msg_recieved.infos);
         }
     }
 
