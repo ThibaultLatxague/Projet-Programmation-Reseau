@@ -1,9 +1,7 @@
-#include <time.h>
 #include <limits.h>
 #include <sys/stat.h>
 
 #include "client.h"
-#include "commands.h"
 
 static int parse_nickname(const char *buffer, char *nick);
 
@@ -140,10 +138,16 @@ int handle_message(int sockfd) {
     struct message *msg = calloc(1, sizeof(struct message));
     if (msg == NULL)
         return -1;
-    char *payload = handle_stdin(sockfd);
+    char *payload = handle_stdin();
+
+    // B1 : EOF sur stdin (Ctrl-D) -> on arrête proprement le client
+    if (payload == NULL) {
+        free(msg);
+        return -1;
+    }
 
     // Une demande de transfert est en attente : la saisie Y/N est la réponse à envoyer
-    if (pending_sender[0] != '\0' && payload != NULL) {
+    if (pending_sender[0] != '\0') {
         char answer = payload[0];
         if (answer == 'Y' || answer == 'y' || answer == 'N' || answer == 'n') {
             msg->type = (answer == 'Y' || answer == 'y') ? FILE_ACCEPT : FILE_REJECT;
@@ -162,8 +166,6 @@ int handle_message(int sockfd) {
             }
             msg->pld_len = pld != NULL ? (int)strlen(pld) : 0;
             protocol_send_message(sockfd, msg, pld);
-            printf("[DEBUG][recepteur] %s envoye au serveur (infos='%s', pld_len=%d, payload='%s')\n",
-                   msg->type == FILE_ACCEPT ? "FILE_ACCEPT" : "FILE_REJECT", msg->infos, msg->pld_len, pld ? pld : "");
             pending_sender[0] = '\0';
             free(payload);
             free(msg);
@@ -175,13 +177,13 @@ int handle_message(int sockfd) {
         return 0;
     }
 
-    enum msg_type type = handle_command(sockfd, payload);
+    enum msg_type type = handle_command(payload);
     if ((int) type < 0) {
         free(payload);
         free(msg);
         return 0;
     }
-    handle_struct(sockfd, msg, type, payload);
+    handle_struct(msg, type, payload);
     protocol_send_message(sockfd, msg, payload);
 
     free(payload);
@@ -189,11 +191,10 @@ int handle_message(int sockfd) {
     return 0;
 }
 
-void handle_struct(int sockfd, struct message *msg, enum msg_type type, char *payload) {
+void handle_struct(struct message *msg, enum msg_type type, char *payload) {
     switch (type) {
     case NICKNAME_LIST:
-        memset(payload, 0, strlen(payload)); // a ajouter si le message est une commande qui ne nécessite pas de payload
-        strcpy(msg->infos, "");
+        memset(payload, 0, strlen(payload)); // commande sans payload
         break;
     case NICKNAME_NEW:
         // Le serveur reçoit uniquement le pseudo (déjà validé par handle_command)
@@ -203,9 +204,6 @@ void handle_struct(int sockfd, struct message *msg, enum msg_type type, char *pa
     case NICKNAME_INFOS:
         strcpy(msg->infos, payload);
         memset(payload, 0, strlen(payload));
-        break;
-    case ECHO_SEND:
-        strcpy(msg->infos, "");
         break;
     case UNICAST_SEND: {
         char *space = strchr(payload, ' ');
@@ -219,9 +217,6 @@ void handle_struct(int sockfd, struct message *msg, enum msg_type type, char *pa
         }
         break;
     }
-    case BROADCAST_SEND:
-        strcpy(msg->infos, "");
-        break;
     case FILE_REQUEST: {
         // "<pseudo> <fichier>" : infos = pseudo du destinataire, payload = nom du fichier
         char *space = strchr(payload, ' ');
@@ -255,7 +250,6 @@ void handle_struct(int sockfd, struct message *msg, enum msg_type type, char *pa
         break;
     }
 
-    strcpy(msg->nick_sender, "userx");
     msg->type = type;
     msg->pld_len = strlen(payload);
 }
@@ -290,7 +284,7 @@ static int parse_nickname(const char *buffer, char *nick) {
 }
 
 // Retourne (enum msg_type)-1 si la commande est invalide (rien ne doit être envoyé).
-enum msg_type handle_command(int sockfd, char *buffer) {
+enum msg_type handle_command(char *buffer) {
     if (strcmp(buffer, "/quit\n") == 0) {
         return (enum msg_type) MULTICAST_QUIT;
     } else if (strncmp(buffer, "/nick", 5) == 0 && (buffer[5] == ' ' || buffer[5] == '\n' || buffer[5] == '\0')) {
@@ -359,11 +353,9 @@ enum msg_type handle_command(int sockfd, char *buffer) {
     return (enum msg_type) ECHO_SEND;
 }
 
-char *handle_stdin(int sockfd) {
+char *handle_stdin(void) {
     char buff[MSG_LEN];
     memset(buff, 0, MSG_LEN);
-    // Ici, Afficher le nom de l'utilisateur qui parle
-    // Ici, vérifier la taille du message < 128 octets
     if (fgets(buff, MSG_LEN, stdin) == NULL)
         return NULL;
 
@@ -375,19 +367,13 @@ char *handle_stdin(int sockfd) {
  * @param peer_fd Le descripteur de la socket du destinataire
  * @param path Le chemin vers le fichier à envoyer
  * @param filename Le nom du fichier
- * @param sender_nick Le nickname de l'expéditeur
  * @return 0 en cas de succès et -1 en cas d'erreur.
  */
-int send_file_chunks(int peer_fd, const char *path, const char *filename, const char *sender_nick) {
+int send_file_chunks(int peer_fd, const char *path, const char *filename) {
     struct message msg = {0};
 
     if (path == NULL || filename == NULL || filename[0] == '\0' || strlen(filename) >= sizeof(msg.infos)) {
         printf("Invalid file path or filename\n");
-        return -1;
-    }
-
-    if (sender_nick != NULL && strlen(sender_nick) >= sizeof(msg.nick_sender)) {
-        printf("Invalid sender nickname\n");
         return -1;
     }
 
@@ -399,8 +385,6 @@ int send_file_chunks(int peer_fd, const char *path, const char *filename, const 
 
     msg.type = FILE_SEND;
     strcpy(msg.infos, filename);
-    if (sender_nick != NULL)
-        strcpy(msg.nick_sender, sender_nick);
 
     unsigned char chunk[MSG_LEN];
 
@@ -418,7 +402,6 @@ int send_file_chunks(int peer_fd, const char *path, const char *filename, const 
             break;
 
         msg.pld_len = n;
-        printf("[DEBUG][emetteur] FILE_SEND : morceau de %d octets sur la socket %d\n", n, peer_fd);
 
         if (protocol_send_message(peer_fd, &msg, chunk) < 0) {
             printf("Could not send file chunk\n");
@@ -458,8 +441,8 @@ int send_file_chunks(int peer_fd, const char *path, const char *filename, const 
 }
 
 /**
- * @brief Envoie le fichier indiqué par path sur la socket déjà connectée peer_fd.
- * @param peer_fd Le descripteur de la socket du destinataire
+ * @brief Reçoit un fichier sur la socket peer_fd (puis la ferme).
+ * @param peer_fd Le descripteur de la socket de l'émetteur
  * @return 0 en cas de succès et -1 en cas d'erreur.
  */
 int receive_file(int peer_fd) {
@@ -473,8 +456,6 @@ int receive_file(int peer_fd) {
     int transfer_complete = 0;
     int result = -1;
     int receiving = 1;
-
-    printf("[DEBUG][recepteur] receive_file : debut de reception sur la socket %d\n", peer_fd);
 
     while (receiving) {
         payload = NULL;
@@ -505,13 +486,13 @@ int receive_file(int peer_fd) {
 
         if (filename[0] == '\0') {
             memcpy(filename, msg.infos, strlen(msg.infos) + 1);
-            if (ensure_directory("build") < 0 || ensure_directory("build/received") < 0) {
+            if (ensure_directory("received") < 0) {
                 perror("create received directory");
                 free(payload);
                 payload = NULL;
                 break;
             }
-            int path_len = snprintf(output_path, sizeof(output_path), "build/received/%s", filename);
+            int path_len = snprintf(output_path, sizeof(output_path), "received/%s", filename);
             if (path_len < 0 || (size_t)path_len >= sizeof(output_path)) {
                 printf("File path is too long\n");
                 free(payload);
@@ -591,7 +572,7 @@ int receive_file(int peer_fd) {
 }
 
 
-// Reçoit la réponse du serveur (taille puis chaîne).
+// Reçoit la réponse du serveur.
 // Retourne -1 si le serveur s'est déconnecté.
 int handle_server(int sockfd) {
     struct message msg_recieved;
@@ -601,110 +582,90 @@ int handle_server(int sockfd) {
 
     char *payload_str = payload ? (char *) payload : "";
 
-    if (strcmp(msg_recieved.infos, "/quit\n") == 0) {
-        printf("/quit received from client on fd %d\n", sockfd);
-        free(payload);
-        return -1;
-    } else {
-        // Le payload d'un FILE_ACCEPT est l'adresse technique IP:port : on ne l'affiche pas
-        if (msg_recieved.type != FILE_ACCEPT)
-            printf("%s\n\n", payload_str);
-        // Demande de transfert reçue : on mémorise l'émetteur et on attend Y/N
-        if (msg_recieved.type == FILE_REQUEST && msg_recieved.infos[0] != '\0')
-            snprintf(pending_sender, sizeof(pending_sender), "%s", msg_recieved.infos);
-        if (msg_recieved.type == FILE_REJECT) {
-            printf("File transfer request rejected by %s\n", msg_recieved.infos);
-            pending_file_path[0] = '\0';
+    // Le payload d'un FILE_ACCEPT est l'adresse technique IP:port : on ne l'affiche pas
+    if (msg_recieved.type != FILE_ACCEPT)
+        printf("%s\n\n", payload_str);
+    // Demande de transfert reçue : on mémorise l'émetteur et on attend Y/N
+    if (msg_recieved.type == FILE_REQUEST && msg_recieved.infos[0] != '\0')
+        snprintf(pending_sender, sizeof(pending_sender), "%s", msg_recieved.infos);
+    if (msg_recieved.type == FILE_REJECT) {
+        printf("File transfer request rejected by %s\n", msg_recieved.infos);
+        pending_file_path[0] = '\0';
+    }
+    if (msg_recieved.type == FILE_ACCEPT) {
+        printf("File transfer request accepted by %s\n", msg_recieved.infos);
+        printf("Starting file transfer...\n");
+
+        // Extraction de "IP:port" (payload bien formé, port entre 1 et 65535)
+        char ip_address[INET_ADDRSTRLEN];
+        char *colon = strchr(payload_str, ':');
+        long port = 0;
+        if (colon != NULL && colon != payload_str && (size_t)(colon - payload_str) < sizeof(ip_address)) {
+            memcpy(ip_address, payload_str, colon - payload_str);
+            ip_address[colon - payload_str] = '\0';
+            char *end = NULL;
+            port = strtol(colon + 1, &end, 10);
+            if (end == colon + 1 || *end != '\0')
+                port = 0;
         }
-        if (msg_recieved.type == FILE_ACCEPT) {
-            // Ici, récupérer dans infos le pseudo de l'émetteur initial et dans le payload l'adresse et le port d'écoute du récepteur
-            // Ensuite connecter à cette adresse/port pour envoyer le fichier
-            // lancer le transfert de fichier
-            printf("File transfer request accepted by %s\n", msg_recieved.infos);
-            printf("Starting file transfer...\n");
-            printf("[DEBUG][emetteur] FILE_ACCEPT recu : infos='%s', pld_len=%d, payload brut='%s'\n",
-                   msg_recieved.infos, msg_recieved.pld_len, payload_str);
-
-            // Extraction de "IP:port" (payload non vide et bien formé, port entre 1 et 65535)
-            char ip_address[INET_ADDRSTRLEN];
-            char *colon = payload != NULL ? strchr(payload_str, ':') : NULL;
-            long port = 0;
-            if (colon != NULL && colon != payload_str && (size_t)(colon - payload_str) < sizeof(ip_address)) {
-                memcpy(ip_address, payload_str, colon - payload_str);
-                ip_address[colon - payload_str] = '\0';
-                char *end = NULL;
-                port = strtol(colon + 1, &end, 10);
-                if (end == colon + 1 || *end != '\0')
-                    port = 0;
-            }
-            if (port < 1 || port > 65535) {
-                printf("Invalid address received for file transfer: '%s'\n", payload_str);
-                pending_file_path[0] = '\0';
-                free(payload);
-                return 0;
-            }
-            printf("[DEBUG][emetteur] adresse extraite : ip='%s', port=%ld\n", ip_address, port);
-
-            // Lancement du transfert du fichier
-            // printf("Starting file transfer to %s...\n", msg_recieved.infos); // msg_received.info contient le pseudo du celui qui recevra le fichier
-            if (pending_file_path[0] == '\0') {
-                printf("No file pending for transfer\n");
-                free(payload);
-                return 0; // Erreur
-            } 
-
-            // Ouverture d'une nouvelle socket pour le transfert
-            int transfer_sock = socket(AF_INET, SOCK_STREAM, 0);
-            if (transfer_sock < 0) {
-                perror("socket");
-                pending_file_path[0] = '\0';
-                free(payload);
-                return 0;
-            }
-            
-            // Création du struct avec le port et adresse IP donnée par le récepteur
-            struct sockaddr_in transfer_addr;
-            memset(&transfer_addr, 0, sizeof(transfer_addr));
-            transfer_addr.sin_family = AF_INET;
-            transfer_addr.sin_port = htons(port);
-            if (inet_pton(AF_INET, ip_address, &transfer_addr.sin_addr) <= 0) {
-                printf("Invalid IP address received: '%s'\n", ip_address);
-                pending_file_path[0] = '\0';
-                free(payload);
-                close(transfer_sock);
-                return 0;
-            }
-
-            // Connexion au récepteur pour le transfert de fichier
-            printf("[DEBUG][emetteur] connect() vers %s:%ld (socket %d, differente de la socket serveur %d)\n",
-                   ip_address, port, transfer_sock, sockfd);
-            if (connect(transfer_sock, (struct sockaddr *)&transfer_addr, sizeof(transfer_addr)) < 0) {
-                perror("connect");
-                pending_file_path[0] = '\0'; // Annuler le fichier en attente de transfert
-                free(payload);
-                close(transfer_sock);
-                return 0;
-            }
-
-            // Connexion réussie
-            printf("Connected to receiver for file transfer\n");
-            // Nom du fichier = dernier élément du chemin
-            const char *filename = strrchr(pending_file_path, '/');
-            const char *bs = strrchr(pending_file_path, '\\');
-            if (bs != NULL && (filename == NULL || bs > filename))
-                filename = bs;
-            filename = filename ? filename + 1 : pending_file_path;
-
-            printf("[DEBUG][emetteur] envoi de '%s' (chemin '%s') sur la socket %d\n", filename, pending_file_path, transfer_sock);
-            int send_ret = send_file_chunks(transfer_sock, pending_file_path, filename, NULL);
-            printf("[DEBUG][emetteur] send_file_chunks a retourne %d\n", send_ret);
-            if (send_ret == 0)
-                printf("%s has received the file.\n", msg_recieved.infos);
-            else
-                printf("File transfer to %s failed\n", msg_recieved.infos);
+        if (port < 1 || port > 65535) {
+            printf("Invalid address received for file transfer: '%s'\n", payload_str);
             pending_file_path[0] = '\0';
+            free(payload);
+            return 0;
+        }
+
+        if (pending_file_path[0] == '\0') {
+            printf("No file pending for transfer\n");
+            free(payload);
+            return 0;
+        }
+
+        // Ouverture d'une nouvelle socket pour le transfert
+        int transfer_sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (transfer_sock < 0) {
+            perror("socket");
+            pending_file_path[0] = '\0';
+            free(payload);
+            return 0;
+        }
+
+        // Création du struct avec le port et adresse IP donnée par le récepteur
+        struct sockaddr_in transfer_addr;
+        memset(&transfer_addr, 0, sizeof(transfer_addr));
+        transfer_addr.sin_family = AF_INET;
+        transfer_addr.sin_port = htons(port);
+        if (inet_pton(AF_INET, ip_address, &transfer_addr.sin_addr) <= 0) {
+            printf("Invalid IP address received: '%s'\n", ip_address);
+            pending_file_path[0] = '\0';
+            free(payload);
             close(transfer_sock);
+            return 0;
         }
+
+        // Connexion au récepteur pour le transfert de fichier
+        if (connect(transfer_sock, (struct sockaddr *)&transfer_addr, sizeof(transfer_addr)) < 0) {
+            perror("connect");
+            pending_file_path[0] = '\0'; // Annuler le fichier en attente de transfert
+            free(payload);
+            close(transfer_sock);
+            return 0;
+        }
+
+        printf("Connected to receiver for file transfer\n");
+        // Nom du fichier = dernier élément du chemin
+        const char *filename = strrchr(pending_file_path, '/');
+        const char *bs = strrchr(pending_file_path, '\\');
+        if (bs != NULL && (filename == NULL || bs > filename))
+            filename = bs;
+        filename = filename ? filename + 1 : pending_file_path;
+
+        if (send_file_chunks(transfer_sock, pending_file_path, filename) == 0)
+            printf("%s has received the file.\n", msg_recieved.infos);
+        else
+            printf("File transfer to %s failed\n", msg_recieved.infos);
+        pending_file_path[0] = '\0';
+        close(transfer_sock);
     }
 
     free(payload);
@@ -726,6 +687,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Usage: %s <server_name> <server_port>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
+
+    // B2 : un write sur une socket fermée par le pair ne doit pas tuer le client
+    signal(SIGPIPE, SIG_IGN);
 
     int sfd = handle_connect(argv[1], argv[2]);
 
@@ -765,9 +729,7 @@ int main(int argc, char *argv[]) {
         }
 
         if(fds[IDX_TRANSFER].revents & POLLIN) {
-            printf("[DEBUG][recepteur] POLLIN sur la socket d'ecoute %d : un emetteur se connecte\n", listen_fd);
             int peer_fd = accept(listen_fd, NULL, NULL);
-            printf("[DEBUG][recepteur] accept() -> peer_fd=%d\n", peer_fd);
             if (peer_fd >= 0 && receive_file(peer_fd) < 0)
                 printf("Erreur lors de la reception du fichier\n");
             close(listen_fd);

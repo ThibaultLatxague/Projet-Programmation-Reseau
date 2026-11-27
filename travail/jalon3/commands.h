@@ -27,13 +27,13 @@ struct client
 // Liste chaînée des clients (définie dans server.c)
 extern struct client *clients;
 
-void handle_client_hello(int sockfd, const char *payload);
+void handle_client_hello(int sockfd);
 void handle_nickname_new(int sockfd, struct message *msg);
 void handle_nickname_list(int sockfd);
 void handle_nickname_infos(int sockfd, struct message *msg);
 void handle_unicast_send(int sockfd, struct message *msg, const char *payload);
 void handle_broadcast_send(int sockfd, struct message *msg, const char *payload);
-void handle_echo_send(int sockfd, struct message *msg, const char *payload);
+void handle_echo_send(int sockfd, const char *payload);
 void handle_file_request(int sockfd, struct message *msg, const char *payload);
 void handle_file_answer(int sockfd, struct message *msg, const char *payload);
 
@@ -41,10 +41,7 @@ void handle_file_answer(int sockfd, struct message *msg, const char *payload);
 void change_nickname(int sockfd, char* nickname);
 int is_nickname_available(const char *nickname);
 
-// Fonction utile pour handle_nickname_list
-char* get_nicknames(int sockfd);
-
 // Fonction utile pour handle_nickname_infos
-char* get_client(int sockfd, char* nickname);
+char* get_client(const char* nickname);
 
 #endif // COMMANDS_H

@@ -13,8 +13,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "../jalon2/common.h"
-#include "../jalon2/msg_struct.h"
+#include "common.h"
+#include "msg_struct.h"
 
 struct message;
 

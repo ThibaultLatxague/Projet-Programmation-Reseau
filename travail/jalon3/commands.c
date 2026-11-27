@@ -1,14 +1,5 @@
-#include <arpa/inet.h>
-#include <errno.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <signal.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include "common.h"
 #include "msg_struct.h"
@@ -34,15 +25,14 @@ static const char *nickname_of(int sockfd)
     return "";
 }
 
-// Premier message d'un client : payload "heure|ip|port"
-void handle_client_hello(int sockfd, const char *payload)
+// Premier message d'un client : on lui répond par le message de bienvenue
+void handle_client_hello(int sockfd)
 {
     struct client *c = clients;
     while (c != NULL && c->fd != sockfd)
         c = c->next;
     if (c == NULL)
         return;
-    (void)payload; // date/IP/port sont déjà renseignés par le serveur dans add_client()
 
     char message_to_send[1024];
     snprintf(message_to_send, sizeof(message_to_send),
@@ -84,49 +74,34 @@ void handle_nickname_new(int sockfd, struct message *msg)
         change_nickname(sockfd, msg->infos);
         char message_to_send[1024];
         snprintf(message_to_send, sizeof(message_to_send), "[Server] : Welcome on the chat %s", msg->infos);
-        if (send_response(sockfd, NICKNAME_NEW, "", message_to_send) < 0) {
+        if (send_response(sockfd, NICKNAME_NEW, "", message_to_send) < 0)
             printf("Error sending nickname acceptance to client on fd %d\n", sockfd);
-            return;
-        }
     } else {
-        // Ici, donner l'info au client que le nickname a été refusé
-        if (send_response(sockfd, NICKNAME_NEW, "", "[Server] : /!\\ Error : Nickname already taken") < 0) {
+        if (send_response(sockfd, NICKNAME_NEW, "", "[Server] : /!\\ Error : Nickname already taken") < 0)
             printf("Error sending nickname rejection to client on fd %d\n", sockfd);
-            return;
-        }
     }
-    return;
 }
 
 void handle_nickname_list(int sockfd)
 {
     char new_payload[1024];
     snprintf(new_payload, sizeof(new_payload), "[Server] : Online users are");
-    int has_users = 0;
     for (struct client *c = clients; c != NULL; c = c->next)
     {
-        if (c->nickname[0] == '\0')
-            continue;
-        has_users = 1;
         strncat(new_payload, "\n           - ", sizeof(new_payload) - strlen(new_payload) - 1);
         strncat(new_payload, c->nickname, sizeof(new_payload) - strlen(new_payload) - 1);
     }
-    const char *payload = has_users ? new_payload : "[Server] : /!\\ Error : no nicknames available";
 
-    if (send_response(sockfd, NICKNAME_LIST, "", payload) < 0) {
+    if (send_response(sockfd, NICKNAME_LIST, "", new_payload) < 0)
         printf("Error sending nickname list to client on fd %d\n", sockfd);
-    }
 }
 
 void handle_nickname_infos(int sockfd, struct message *msg)
 {
-    char* client_info = get_client(sockfd, msg->infos);
+    char* client_info = get_client(msg->infos);
     const char *payload = client_info != NULL ? client_info : "[Server] : /!\\ Error : Client not found";
     if (send_response(sockfd, NICKNAME_INFOS, "", payload) < 0)
-    {
         printf("Error sending client info to client on fd %d\n", sockfd);
-        return;
-    }
 }
 
 void handle_unicast_send(int sockfd, struct message *msg, const char *payload)
@@ -162,7 +137,7 @@ void handle_broadcast_send(int sockfd, struct message *msg, const char *payload)
     payload = formatted_payload;
     while (c != NULL)
     {
-        if (c->fd != sockfd && c->nickname[0] != '\0')
+        if (c->fd != sockfd)
         {
             if (send_response(c->fd, BROADCAST_SEND, msg->nick_sender, payload) < 0)
             {
@@ -174,18 +149,16 @@ void handle_broadcast_send(int sockfd, struct message *msg, const char *payload)
     printf("End of BROADCAST_SEND handling for client on fd %d\n", sockfd);
 }
 
-void handle_echo_send(int sockfd, struct message *msg, const char *payload)
+void handle_echo_send(int sockfd, const char *payload)
 {
     char message_to_send[1024];
     snprintf(message_to_send, sizeof(message_to_send), "[Server] : %s", payload);
-    // send_response recalcule pld_len : msg->pld_len est celui du message reçu (sans le préfixe)
     if (send_response(sockfd, ECHO_SEND, "", message_to_send) < 0)
     {
         printf("Error sending message to client on fd %d\n", sockfd);
         return;
     }
     printf("End of ECHO_SEND\n");
-    return;
 }
 
 void handle_file_request(int sockfd, struct message *msg, const char *payload){
@@ -209,7 +182,7 @@ void handle_file_request(int sockfd, struct message *msg, const char *payload){
     // plus tard sous forme d'un message FILE_ACCEPT / FILE_REJECT (cf. handle_file_answer).
     while (c != NULL)
     {
-        if (c->nickname[0] != '\0' && strcmp(c->nickname, recipient_nickname) == 0)
+        if (strcmp(c->nickname, recipient_nickname) == 0)
         {
             if (send_response(c->fd, FILE_REQUEST, msg->nick_sender, payload) < 0)
                 printf("Error sending file request to client on fd %d\n", c->fd);
@@ -226,9 +199,6 @@ void handle_file_answer(int sockfd, struct message *msg, const char *payload)
 {
     char text[1024];
     const char *answerer = nickname_of(sockfd);
-    printf("[DEBUG][serveur] %s de '%s' pour l'emetteur '%s' : pld_len=%d, payload recu='%s'\n",
-           msg->type == FILE_ACCEPT ? "FILE_ACCEPT" : "FILE_REJECT", answerer, msg->infos,
-           msg->pld_len, payload ? payload : "(aucun)");
     // Acceptation : on relaie l'adresse "IP:port" du récepteur (le client affiche lui-même le message).
     // Refus : on relaie un texte.
     const char *to_send = text;
@@ -244,9 +214,8 @@ void handle_file_answer(int sockfd, struct message *msg, const char *payload)
 
     for (struct client *c = clients; c != NULL; c = c->next)
     {
-        if (c->nickname[0] != '\0' && strcmp(c->nickname, msg->infos) == 0)
+        if (strcmp(c->nickname, msg->infos) == 0)
         {
-            printf("[DEBUG][serveur] relais vers l'emetteur (fd %d) : '%s'\n", c->fd, to_send);
             if (send_response(c->fd, msg->type, answerer, to_send) < 0)
                 printf("Error sending file answer to client on fd %d\n", c->fd);
             return;
@@ -284,23 +253,7 @@ int is_nickname_available(const char *nickname)
 	return 1;
 }
 
-char* get_nicknames(int sockfd){
-    static char nicknames[1024];
-    nicknames[0] = '\0';
-    struct client *c = clients;
-    while (c != NULL)
-    {
-        if (c->nickname[0] != '\0')
-        {
-            strcat(nicknames, c->nickname);
-            strcat(nicknames, "\n");
-        }
-        c = c->next;
-    }
-    return nicknames;
-}
-
-char* get_client(int sockfd, char* nickname){
+char* get_client(const char* nickname){
     static char client_info[1024];
     client_info[0] = '\0';
     struct client *c = clients;

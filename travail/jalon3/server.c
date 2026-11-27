@@ -68,12 +68,6 @@ void remove_client(int fd)
 	}
 }
 
-void free_clients()
-{
-	while (clients != NULL)
-		remove_client(clients->fd);
-}
-
 int handle_bind(char *serv_port)
 {
 	struct addrinfo hints, *result, *rp;
@@ -115,8 +109,6 @@ void disconnect_client(struct pollfd *pfd)
 	printf("Client on fd %d disconnected\n", pfd->fd);
 	remove_client(pfd->fd);
 	pfd->fd = -1;
-	pfd->events = 0;
-	pfd->revents = 0;
 }
 
 int handle_command(int sockfd, struct message *msg, const char *payload)
@@ -128,7 +120,7 @@ int handle_command(int sockfd, struct message *msg, const char *payload)
 			return -1;
 		case CLIENT_HELLO:
 			printf("Connection infos received from client on fd %d\n", sockfd);
-			handle_client_hello(sockfd, payload);
+			handle_client_hello(sockfd);
 			break;
 		case NICKNAME_NEW:
 			printf("/nick received from client on fd %d\n", sockfd);
@@ -162,7 +154,7 @@ int handle_command(int sockfd, struct message *msg, const char *payload)
 		default:
 			// Case ECHO_SEND par défaut selon les consignes du jalon 2
 			printf("No commands (using echo) received from client on fd %d\n", sockfd);
-			handle_echo_send(sockfd, msg, payload);
+			handle_echo_send(sockfd, payload);
 			break;
 	}
 	return 0;
@@ -184,7 +176,6 @@ int handle_message(int sockfd)
 		return -1;
 	}
 
-	printf("Received: %s\n", payload_str);
 	free(payload);
 	return 0;
 }
@@ -197,34 +188,32 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
+	// B2 : un write sur une socket fermée par un client ne doit pas tuer le serveur
+	signal(SIGPIPE, SIG_IGN);
+
 	int listen_fd = handle_bind(argv[1]);
 	die(listen(listen_fd, BACKLOG), "listen()");
 
 	// Poll sur la socket d'écoute (indice 0) et sur les sockets clientes
 	struct pollfd fds[MAX_CONN] = {0};
 	for (int i = 1; i < MAX_CONN; i++)
-	{
 		fds[i].fd = -1;
-		fds[i].events = 0;
-		fds[i].revents = 0;
-	}
 	fds[0].fd = listen_fd;
 	fds[0].events = POLLIN;
-	fds[0].revents = 0;
 
 	while (1)
 	{
-		int nfds = poll(fds, MAX_CONN, -1);
-		if (nfds < 0)
+		int ret = poll(fds, MAX_CONN, -1);
+		if (ret < 0)
 		{
 			if (errno == EINTR)
 				continue;
-			die(nfds, "poll");
+			die(ret, "poll");
 		}
 
 		for (int i = 0; i < MAX_CONN; i++)
 		{
-			if (fds[i].fd == listen_fd && (fds[i].revents & POLLIN))
+			if (i == 0 && (fds[i].revents & POLLIN))
 			{
 				struct sockaddr_storage client_addr;
 				socklen_t client_addr_len = sizeof(client_addr);
@@ -250,21 +239,16 @@ int main(int argc, char *argv[])
 					fprintf(stderr, "Max connections reached, closing new connection\n");
 					close(new_fd);
 				}
-				fds[i].revents = 0;
 			}
-			else if (fds[i].fd != listen_fd && fds[i].fd != -1 && (fds[i].revents & POLLIN))
+			else if (i != 0 && fds[i].fd != -1 && (fds[i].revents & POLLIN))
 			{
 				if (handle_message(fds[i].fd) < 0)
 					disconnect_client(&fds[i]);
 			}
-			else if (fds[i].fd != listen_fd && fds[i].fd != -1 && (fds[i].revents & (POLLHUP | POLLERR)))
+			else if (i != 0 && fds[i].fd != -1 && (fds[i].revents & (POLLHUP | POLLERR)))
 			{
 				disconnect_client(&fds[i]);
 			}
 		}
 	}
-
-	free_clients();
-	close(listen_fd);
-	return EXIT_SUCCESS;
 }
